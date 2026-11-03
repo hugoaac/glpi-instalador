@@ -23,6 +23,7 @@ final class Preparador
         private readonly Armazem $armazem,
         private readonly Assinatura $assinatura,
         private readonly ?PainelApi $painel = null,
+        private readonly Espelho $espelho = new Espelho(null),
     ) {
     }
 
@@ -51,7 +52,13 @@ final class Preparador
                 'tipo' => $r['plano']['tipo'], 'versao_de' => $r['plano']['de'], 'versao_para' => $r['plano']['para'],
                 'migracao' => $r['plano']['migracao'], 'plano' => Plano::json($r['plano']), 'plano_sha256' => $r['sha256'],
             ]);
-            $this->armazem->journal($opId, 'PREPARAR', 'DEPOIS', ['estado' => 'PLANO_PRONTO', 'plano_sha256' => $r['sha256']]);
+            // B-08: o journal só afirma PLANO_PRONTO se a transição aconteceu; senão registra o erro e limpa o staging.
+            if ($ok) {
+                $this->armazem->journal($opId, 'PREPARAR', 'DEPOIS', ['estado' => 'PLANO_PRONTO', 'plano_sha256' => $r['sha256']]);
+            } else {
+                $this->limpar($caminhos, $opId, $raizExistia);
+                $this->armazem->journal($opId, 'PREPARAR', 'ERRO', ['motivo' => 'transicao_concorrente']);
+            }
 
             return ['estado' => $ok ? 'PLANO_PRONTO' : 'IGNORADA', 'resultado' => null, 'motivo' => null, 'plano' => $r['plano']];
         }
@@ -82,16 +89,19 @@ final class Preparador
         }
 
         // 3. O zip: baixa se for do painel e ainda não está em disco; confere tamanho e sha256 do manifesto.
+        // B-01: zip em disco que não confere é apagado (não fica "envenenado" no nome definitivo) e, sendo do
+        // painel, baixado de novo UMA vez. O download é conferido no .tmp antes do rename.
         $zip = $caminhos->zip($m['zip_sha256']);
+        if (is_file($zip) && self::confere($zip, $m) !== null) {
+            @unlink($zip);
+        }
         if (!is_file($zip)) {
             $this->baixar($pacote, $m, $caminhos, $zip);
         }
-        clearstatcache(true, $zip);
-        if (filesize($zip) !== $m['zip_bytes']) {
-            throw new Recusa('zip_bytes');
-        }
-        if (hash_file('sha256', $zip) !== $m['zip_sha256']) {
-            throw new Recusa('zip_sha256');
+        $erroZip = self::confere($zip, $m);
+        if ($erroZip !== null) {
+            @unlink($zip);
+            throw new Recusa($erroZip);
         }
 
         // 4. Retirado (P-3: a marca é local e só vai num sentido).
@@ -111,36 +121,28 @@ final class Preparador
         }
 
         // 6. R1 com proveniência.
-        $r1 = R1::avaliar($this->ctx, $this->armazem, $m['chave']);
+        $r1 = R1::avaliar($this->ctx, $this->armazem, $this->assinatura, $m['chave']);
         if ($r1['resultado'] !== R1::OK) {
             return ['resultado' => R1::GERENCIADO, 'motivo' => $r1['motivo']];
         }
 
-        // 7. Versão. "de" vem de glpi_plugins, só para a decisão; o código instalado nunca é carregado.
-        $reg = $this->armazem->registroPlugin($m['chave']);
-        $de  = null;
-        if ($reg !== null) {
-            if (preg_match(Manifesto::RE_VERSAO, (string) $reg['version']) !== 1) {
-                throw new Recusa('versao_instalada_ilegivel', (string) $reg['version']);
-            }
-            $de = (string) $reg['version'];
-        }
-        $vista    = $this->armazem->versaoVista($m['chave']);
-        $abaixo   = false;
+        // 7. Versão. B-02: "de" é a versão do manifesto ASSINADO cuja arvore é a de marketplace/<chave> (R1);
+        // glpi_plugins.version não decide nada. O maior visto é o máximo entre banco, espelho em arquivo e manifestos.
+        $de     = $r1['de'];
+        $abaixo = false;
         if ($de !== null) {
             $cmp = Manifesto::compararVersao($m['versao'], $de);
             if ($cmp < 0) {
                 throw new Recusa('downgrade', $de . ' -> ' . $m['versao']);
             }
             if ($cmp === 0) {
-                $ult = $this->armazem->ultimaOperacaoOk($m['chave']);
-                $hashInstalado = $ult !== null ? ($this->armazem->pacotePorId((int) ($ult['pacotes_id'] ?? 0))['zip_sha256'] ?? null) : null;
-                if ($hashInstalado === $m['zip_sha256']) {
+                if ($r1['zip_sha256'] === $m['zip_sha256']) {
                     return ['resultado' => 'JA_NO_ALVO', 'motivo' => ''];
                 }
                 throw new Recusa('mesma_versao', $m['versao']);
             }
         }
+        $vista = Fatos::maiorVista($this->armazem, $this->assinatura, $this->espelho, $m['chave']);
         if ($vista !== null && Manifesto::compararVersao($m['versao'], $vista['versao_max']) < 0) {
             $abaixo = true; // D2-03.1: a aprovação (fatia c) exigirá o segundo checkbox
         }
@@ -149,7 +151,11 @@ final class Preparador
         if (!Plano::dentroDaFaixa($this->ctx->glpiVersao, $m['glpi_min'], $m['glpi_max'])) {
             throw new Recusa('glpi_fora_da_faixa', $this->ctx->glpiVersao);
         }
-        if ($this->ctx->fpmDirs !== null && $this->ctx->fpmDirs !== $this->ctx->pluginsDirs) {
+        // B-09: falha fechado. Sem a visão do FPM não há como afirmar que CLI e FPM veem as mesmas pastas.
+        if ($this->ctx->fpmDirs === null) {
+            throw new Recusa('diretorios_cli_fpm_desconhecido');
+        }
+        if ($this->ctx->fpmDirs !== $this->ctx->pluginsDirs) {
             throw new Recusa('diretorios_cli_fpm');
         }
 
@@ -165,10 +171,11 @@ final class Preparador
 
         // 10. P-2: maior versão de manifesto VÁLIDO já visto.
         $this->armazem->registrarVersaoVista($m['chave'], $m['versao'], $m['zip_sha256']);
-        $vista = $this->armazem->versaoVista($m['chave']);
+        $this->espelho->registrar($m['chave'], $m['versao']);
+        $vista = Fatos::maiorVista($this->armazem, $this->assinatura, $this->espelho, $m['chave']);
 
         // 11. O plano.
-        $p = Plano::montar($m, $de, $keyId, $r1, $this->ctx, $this->armazem->tabelasBackup($m['chave']), $vista, $abaixo, (int) $info['total']);
+        $p = Plano::montar($m, $de, $keyId, ['resultado' => $r1['resultado'], 'motivo' => $r1['motivo']], $this->ctx, $this->armazem->tabelasBackup($m['chave']), $vista, $abaixo, (int) $info['total']);
 
         return ['plano' => $p['plano'], 'sha256' => $p['sha256']];
     }
@@ -183,15 +190,33 @@ final class Preparador
             throw new Recusa('pasta_pacotes');
         }
         $tmp = $zip . '.tmp' . getmypid();
-        $r   = $this->painel->pedirPacote($m['zip_sha256'], $m['zip_bytes'], $tmp);
+        @unlink($tmp);
+        $r = $this->painel->pedirPacote($m['zip_sha256'], $m['zip_bytes'], $tmp);
         if (($r['status'] ?? null) !== 200) {
             @unlink($tmp);
             throw new Recusa('download', 'HTTP ' . ($r['status'] ?? '?'));
+        }
+        // B-01: tamanho e hash no .tmp ANTES do rename; divergência apaga o .tmp e nada fica no nome definitivo.
+        $erro = self::confere($tmp, $m);
+        if ($erro !== null) {
+            @unlink($tmp);
+            throw new Recusa($erro, 'download não confere');
         }
         if (!rename($tmp, $zip)) {
             @unlink($tmp);
             throw new Recusa('download', 'rename');
         }
+    }
+
+    /** null se o arquivo tem o tamanho e o sha256 do manifesto; senão o motivo. */
+    public static function confere(string $arquivo, array $m): ?string
+    {
+        clearstatcache(true, $arquivo);
+        if (!is_file($arquivo) || filesize($arquivo) !== $m['zip_bytes']) {
+            return 'zip_bytes';
+        }
+
+        return hash_file('sha256', $arquivo) === $m['zip_sha256'] ? null : 'zip_sha256';
     }
 
     /** Falhou depois de criar staging: apaga a pasta da operação e a raiz do staging se ficou vazia. */

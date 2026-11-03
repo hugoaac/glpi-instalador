@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace GlpiPlugin\Instalador;
 
+use RuntimeException;
+
 /**
  * Armazém em MySQL/MariaDB. Sempre $DB->request()/insert()/update()/delete(); nenhum SQL com valor interpolado.
  * Toda transição de estado é UPDATE ... WHERE id=? AND estado=<esperado> e só vale com 1 linha afetada (D2-08).
@@ -49,6 +51,10 @@ final class ArmazemDb implements Armazem
     public function inserirPacote(array $p): int
     {
         global $DB;
+        $porHash = $this->pacotePorHash($p['zip_sha256']);
+        if ($porHash !== null && ($porHash['chave'] !== $p['chave'] || $porHash['versao'] !== $p['versao'])) {
+            throw new Recusa('zip_repetido', $p['zip_sha256']);
+        }
         $existente = $this->pacotePorVersao($p['chave'], $p['versao']);
         if ($existente !== null) {
             if ($existente['zip_sha256'] !== $p['zip_sha256']) {
@@ -57,18 +63,20 @@ final class ArmazemDb implements Armazem
 
             return (int) $existente['id'];
         }
-        $ok = $DB->insert(self::T_PACOTES, [
-            'chave' => $p['chave'], 'versao' => $p['versao'], 'zip_sha256' => $p['zip_sha256'],
-            'manifesto' => $p['manifesto'], 'sig' => $p['sig'], 'key_id' => $p['key_id'], 'origem' => $p['origem'],
-            'arquivo_ok' => 0, 'retirado' => 0, 'date_creation' => self::agora(),
-        ]);
-        if (!$ok) {
-            // corrida contra o índice único (chave, versao) ou zip_sha256
+        // B-10: no GLPI 11, $DB->insert() LANÇA RuntimeException em erro de SQL (DBmysql.php:416). Uma corrida no
+        // índice único (cron e upload ao mesmo tempo) não derruba a rodada: relê pelo índice e decide.
+        try {
+            $DB->insert(self::T_PACOTES, [
+                'chave' => $p['chave'], 'versao' => $p['versao'], 'zip_sha256' => $p['zip_sha256'],
+                'manifesto' => $p['manifesto'], 'sig' => $p['sig'], 'key_id' => $p['key_id'], 'origem' => $p['origem'],
+                'arquivo_ok' => 0, 'retirado' => 0, 'date_creation' => self::agora(),
+            ]);
+        } catch (RuntimeException) {
             $de_novo = $this->pacotePorVersao($p['chave'], $p['versao']);
             if ($de_novo !== null && $de_novo['zip_sha256'] === $p['zip_sha256']) {
                 return (int) $de_novo['id'];
             }
-            throw new Recusa('mesma_versao', $p['chave'] . ' ' . $p['versao']);
+            throw new Recusa($de_novo !== null ? 'mesma_versao' : 'zip_repetido', $p['chave'] . ' ' . $p['versao']);
         }
 
         return (int) $DB->insertId();
@@ -174,7 +182,12 @@ final class ArmazemDb implements Armazem
     {
         global $DB;
         $agora = self::agora();
-        $DB->insert(self::T_OPS, $dados + ['estado' => 'PEDIDA', 'date_creation' => $agora, 'date_mod' => $agora]);
+        try {
+            $DB->insert(self::T_OPS, $dados + ['estado' => 'PEDIDA', 'date_creation' => $agora, 'date_mod' => $agora]);
+        } catch (RuntimeException) {
+            // B-07: UNIQUE em aberta_chave (coluna gerada): já existe operação aberta para a chave.
+            throw new Recusa('operacao_aberta', (string) ($dados['chave'] ?? ''));
+        }
 
         return (int) $DB->insertId();
     }

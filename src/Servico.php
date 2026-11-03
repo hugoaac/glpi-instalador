@@ -23,7 +23,17 @@ final class Servico
 
     public static function preparador(): Preparador
     {
-        return new Preparador(Contexto::doGlpi(), self::armazem(), new Assinatura(), self::painel());
+        $ctx = Contexto::doGlpi();
+
+        return new Preparador($ctx, self::armazem(), new Assinatura(), self::painel(), self::espelho($ctx));
+    }
+
+    /** B-02b: espelho em arquivo da maior versão vista, em GLPI_PLUGIN_DOC_DIR/instalador/. */
+    public static function espelho(?Contexto $ctx = null): Espelho
+    {
+        $ctx ??= Contexto::doGlpi();
+
+        return new Espelho($ctx->docDir . '/versoes_vistas.json');
     }
 
     /** @return list<array{ok:?bool,nome:string,detalhe:string}> ok=null: aviso informativo */
@@ -52,7 +62,7 @@ final class Servico
     /** @return array{ok:bool,erro:?string,novos:int,conhecidos:int,rejeitados:list<string>,retirados:int,vistas:int} */
     public static function atualizarCatalogo(): array
     {
-        $r = Catalogo::atualizar(self::painel(), self::armazem(), new Assinatura());
+        $r = Catalogo::atualizar(self::painel(), self::armazem(), new Assinatura(), self::espelho());
         Config::set(['catalogo_em' => (string) time(), 'catalogo_status' => json_encode($r, JSON_UNESCAPED_UNICODE)]);
 
         return $r;
@@ -74,21 +84,17 @@ final class Servico
                 return ['ok' => false, 'msg' => 'já existe a operação #' . $o['id'] . ' aberta para ' . $p['chave'], 'id' => null];
             }
         }
-        $id = $arm->criarOperacao([
-            'tipo' => 'INSTALAR', 'chave' => $p['chave'], 'versao_para' => $p['versao'], 'pacotes_id' => (int) $p['id'],
-            'pedido_por' => $usuario, 'inicio' => date('Y-m-d H:i:s'),
-        ]);
+        try {
+            // B-07: a unicidade "uma operação aberta por chave" é do banco (coluna gerada + UNIQUE), não deste foreach.
+            $id = $arm->criarOperacao([
+                'tipo' => 'INSTALAR', 'chave' => $p['chave'], 'versao_para' => $p['versao'], 'pacotes_id' => (int) $p['id'],
+                'pedido_por' => $usuario, 'inicio' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (Recusa $e) {
+            return ['ok' => false, 'msg' => 'já existe operação aberta para ' . Texto::esc((string) $p['chave']), 'id' => null];
+        }
         $arm->journal($id, 'PEDIR', 'DEPOIS', ['pacotes_id' => (int) $p['id'], 'chave' => $p['chave'], 'versao' => $p['versao']]);
 
         return ['ok' => true, 'msg' => 'operação #' . $id . ' pedida; o cron prepara em até 1 minuto (php front/cron.php --force InstaladorExecutor)', 'id' => $id];
-    }
-
-    public static function seguro(callable $f, string $padrao): string
-    {
-        try {
-            return (string) $f();
-        } catch (Throwable $e) {
-            return $padrao . ': ' . mb_substr($e->getMessage(), 0, 120);
-        }
     }
 }

@@ -11,6 +11,16 @@ Legenda: **[root]** = root no host ou `docker`; **[git]** = `user-glpidev` por `
 3. **[root]** `docker exec -u www-data glpi-hubedesk-glpi-1 php -v` (esperado 8.5.10).
 4. **Chaves:** o `key_id` `38f6f9ceaa9c094c` em `src/Publicadores.php` e em `publicador.js`. A reserva ainda não existe: a tela mostrará "Chaves de publicador fixadas: 1 de 2" em vermelho. É esperado no Hubedesk; **bloqueia qualquer cliente**.
 
+### 0b. Duas conferências da revisão do Sable (B-06 e "raiz web"), obrigatórias antes do teste
+
+5. **Raiz web em `public/`.** O staging fica dentro do marketplace (`.hub-staging`, `.hub-anterior`); só a raiz em `public/` o deixa fora do alcance da web.
+   - **[root]** no nginx do contêiner ou do host: `grep -rn "root " <conf do glpi-hubedesk>`: a linha tem de terminar em `/public`.
+   - Prova de fora, depois do passo 8 (staging existe): `curl -s -o /dev/null -w '%{http_code}\n' https://<host-do-hubedesk>/marketplace/.hub-staging/` e `.../.hub-staging/op<id>/subticket/setup.php`: **404** nos dois. Se der 200 ou 403 de diretório listável, **pare**.
+6. **O cron roda como `www-data`, nunca como root.** O instalador confere o `euid` do processo (`posix_geteuid()`): root, ou um uid diferente do dono do marketplace, e a rodada **não faz nada** e registra isso em `instalador.log`.
+   - **[root]** `docker exec glpi-hubedesk-glpi-1 stat -c '%U' /var/glpi/marketplace` (esperado `www-data`).
+   - `docker exec -u www-data glpi-hubedesk-glpi-1 php front/cron.php --force InstaladorExecutor` (faz o trabalho) e, como prova negativa, `docker exec -u root glpi-hubedesk-glpi-1 php front/cron.php --force InstaladorExecutor`: não prepara nada e o log diz "euid do cron (0) ...". Confira que o cron do contêiner (`crontab -l -u www-data`, ou o `supervisord`) usa `www-data`.
+7. **A visão do FPM é obrigatória.** Sem ela o Preparar falha fechado (`diretorios_cli_fpm_desconhecido`). Abra a tela Administração > Instalador uma vez pelo navegador **antes** do primeiro "Preparar e planejar".
+
 ## 1. Instalar o código (somente git, [git] como `user-glpidev`)
 
 ```
@@ -48,6 +58,13 @@ Não clonar o `subticket` aqui (§6.4). O instalador e o informante ficam em `pl
      ```
      Esperado: `0 falharam`, `diff` vazio. O teste usa `GLPI_MARKETPLACE_DIR` do ambiente do contêiner e imprime `(marketplace real: /var/glpi/marketplace)`.
    - **9e-mutação:** **[git]** no clone, trocar em `src/Preparador.php` a linha `$info  = ZipInspetor::arvoreDoZip(...)` por `$info = ['arvore' => $m['arvore_sha256'], 'total' => 0, 'entradas' => [], 'raiz' => $m['chave']];`, repetir o comando acima (**tem de falhar**, ~32 falhas), e `git checkout src/Preparador.php`.
+
+## 3b. Novos negativos desta revisão (opcionais, mas baratos)
+
+- **Download interrompido (B-01):** não precisa mais apagar o zip à mão. Um zip que não confere é apagado e, sendo do painel, baixado de novo uma vez. Se aparecer `pacotes/<sha>.zip` incorreto, a próxima preparação o troca.
+- **Operação presa (B-07):** se um `kill -9` deixar uma operação em `PREPARANDO`, a próxima rodada do cron a marca `FALHA interrompida` e limpa o staging.
+- **Duas operações na mesma chave (B-07):** o segundo "Preparar e planejar" da mesma chave, com a primeira aberta, é recusado pelo banco.
+- **Mensagens (B-05):** nenhuma mensagem de erro do catálogo mostra HTML.
 
 ## 4. Depois
 

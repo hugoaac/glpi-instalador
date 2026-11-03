@@ -48,3 +48,11 @@
 ## Correções e divergências em relação ao desenho
 
 Ver a resposta de entrega: (1) catálogo rejeita `zip_repetido`; (2) `Api` é instância com métodos fixos, não estática; (3) o instalador calcula a própria `arvore` em vez de pedir ao informante; (4) `glpi_max` exclusivo; (5) assinatura vem antes do canônico, então 1 byte a mais no manifesto é `assinatura`, não `canonico`.
+
+## Revisão do Sable (03/11): correções aplicadas
+
+Código: B-01 (zip conferido no `.tmp`, envenenado apagado e rebaixado uma vez, upload substitui), B-02 (de e proveniência de manifesto assinado reverificado; maior visto = banco, espelho em arquivo e manifestos), B-03 (`GET_LOCK` com `SHA1(DATABASE())`), B-04 (varredura por `token_get_all`), B-05 (`Texto::esc`), B-06 (`euid`), B-07 (retomada de `PREPARANDO` e unicidade por coluna gerada), B-08, B-09 (falha fechado), B-10 (`RuntimeException` do insert), B-11 (folha conferida), B-14, B-15.
+Ficam para a fatia (c): B-12, P-4, P-5, P-6. Não feitos: B-13 (só texto no desenho, §8), B-16 e B-17 (ver a resposta de entrega).
+
+Testado (executado): `php tests/run.php` 261 asserções, 0 falhas (informante 87). 18 mutações novas no instalador, 17 pegas e 1 equivalente (B-01a: a conferência final após o rename apaga o arquivo, então o efeito observável é o mesmo; a ordem tmp-antes-do-rename não é observável por teste). Smoke no GLPI local: install/activate/uninstall; a coluna gerada `aberta_chave` com UNIQUE recusa a 2ª operação aberta na mesma chave e libera após fechar; `$DB->insert` duplicado lança `RuntimeException` (confirma o B-10); `GET_LOCK` com o nome novo devolve 1.
+Não testado: `GET_LOCK` com dois bancos diferentes no mesmo servidor; o cron como root real (só a função `euidOk`).

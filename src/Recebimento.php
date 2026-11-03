@@ -15,7 +15,7 @@ final class Recebimento
      * @param string $zipTmp caminho do zip já recebido (em produção, resultado de move_uploaded_file para a pasta temporária)
      * @return array{id:int,manifesto:array<string,mixed>}
      */
-    public static function receber(Armazem $armazem, Assinatura $assinatura, Caminhos $caminhos, string $zipTmp, string $manifestoBytes, string $sigBytes): array
+    public static function receber(Armazem $armazem, Assinatura $assinatura, Caminhos $caminhos, string $zipTmp, string $manifestoBytes, string $sigBytes, ?Espelho $espelho = null): array
     {
         ['manifesto' => $m, 'key_id' => $keyId] = $assinatura->verificar($manifestoBytes, $sigBytes);
         clearstatcache(true, $zipTmp);
@@ -35,17 +35,28 @@ final class Recebimento
         if (!is_dir($pasta) && !mkdir($pasta, 0700, true)) {
             throw new Recusa('pasta_pacotes');
         }
+        // B-01: o $zipTmp já foi conferido acima. Destino existente com hash errado (cache envenenado) é SUBSTITUÍDO;
+        // com hash certo, fica. O arquivo FINAL é conferido de novo antes de marcar arquivo_ok.
         $destino = $caminhos->zip($m['zip_sha256']);
+        if (is_file($destino) && Preparador::confere($destino, $m) !== null) {
+            @unlink($destino);
+        }
         if (!is_file($destino) && !rename($zipTmp, $destino)) {
             throw new Recusa('guardar', 'não moveu o zip');
         }
         @chmod($destino, 0600);
+        $erroFinal = Preparador::confere($destino, $m);
+        if ($erroFinal !== null) {
+            @unlink($destino);
+            throw new Recusa($erroFinal, 'arquivo guardado não confere');
+        }
         $id = $armazem->inserirPacote([
             'chave' => $m['chave'], 'versao' => $m['versao'], 'zip_sha256' => $m['zip_sha256'],
             'manifesto' => base64_encode($manifestoBytes), 'sig' => base64_encode($sigBytes), 'key_id' => $keyId, 'origem' => 'upload',
         ]);
-        $armazem->marcarArquivo($m['zip_sha256'], true);
+        $armazem->marcarArquivo($m['zip_sha256'], true); // só depois de conferir o arquivo final
         $armazem->registrarVersaoVista($m['chave'], $m['versao'], $m['zip_sha256']);
+        $espelho?->registrar($m['chave'], $m['versao']);
 
         return ['id' => $id, 'manifesto' => $m];
     }

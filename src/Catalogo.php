@@ -19,7 +19,7 @@ final class Catalogo
     /**
      * @return array{ok:bool,erro:?string,novos:int,conhecidos:int,rejeitados:list<string>,retirados:int,vistas:int}
      */
-    public static function atualizar(PainelApi $painel, Armazem $armazem, Assinatura $assinatura): array
+    public static function atualizar(PainelApi $painel, Armazem $armazem, Assinatura $assinatura, ?Espelho $espelho = null): array
     {
         $r = ['ok' => false, 'erro' => null, 'novos' => 0, 'conhecidos' => 0, 'rejeitados' => [], 'retirados' => 0, 'vistas' => 0];
         try {
@@ -71,6 +71,7 @@ final class Catalogo
             if ($armazem->registrarVersaoVista($m['chave'], $m['versao'], $m['zip_sha256'])) {
                 $r['vistas']++;
             }
+            $espelho?->registrar($m['chave'], $m['versao']); // B-02b: o espelho em arquivo acompanha
             $existente = $armazem->pacotePorHash($m['zip_sha256']);
             if ($existente !== null) {
                 if ($existente['chave'] !== $m['chave'] || $existente['versao'] !== $m['versao']) {

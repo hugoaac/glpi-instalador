@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace GlpiPlugin\Instalador;
 
 /** Armazém em memória para os testes. Reproduz unicidade, retirado de mão única e transição condicional. */
-final class ArmazemMemoria implements Armazem
+class ArmazemMemoria implements Armazem
 {
     /** @var array<int,array<string,mixed>> */
     public array $pacotes = [];
@@ -49,6 +49,10 @@ final class ArmazemMemoria implements Armazem
 
     public function inserirPacote(array $p): int
     {
+        $porHash = $this->pacotePorHash($p['zip_sha256']);
+        if ($porHash !== null && ($porHash['chave'] !== $p['chave'] || $porHash['versao'] !== $p['versao'])) {
+            throw new Recusa('zip_repetido', $p['zip_sha256']);
+        }
         $existente = $this->pacotePorVersao($p['chave'], $p['versao']);
         if ($existente !== null) {
             if ($existente['zip_sha256'] !== $p['zip_sha256']) {
@@ -132,6 +136,12 @@ final class ArmazemMemoria implements Armazem
 
     public function criarOperacao(array $dados): int
     {
+        // B-07: no máximo UMA operação aberta por chave (no banco: coluna gerada com UNIQUE).
+        foreach ($this->operacoes as $o) {
+            if ($o['chave'] === $dados['chave'] && !in_array($o['estado'], ['FALHA', 'CONCLUIDA'], true)) {
+                throw new Recusa('operacao_aberta', $dados['chave']);
+            }
+        }
         $id = count($this->operacoes) + 1;
         $this->operacoes[$id] = $dados + ['id' => $id, 'estado' => 'PEDIDA', 'resultado' => null, 'motivo' => null,
             'plano' => null, 'plano_sha256' => null, 'arvore_final' => null];

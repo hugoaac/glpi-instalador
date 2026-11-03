@@ -74,12 +74,12 @@ final class Caminhos
 
     public function stagingRaiz(): string
     {
-        return $this->mp . '/.hub-staging';
+        return $this->conferir($this->mp . '/.hub-staging', $this->mp);
     }
 
     public function stagingOp(int $opId): string
     {
-        return $this->stagingRaiz() . '/' . self::op($opId);
+        return $this->conferir($this->stagingRaiz() . '/' . self::op($opId), $this->mp);
     }
 
     public function S(string $chave, int $opId): string
@@ -113,12 +113,16 @@ final class Caminhos
 
     public function pastaPacotes(): string
     {
-        return $this->doc . '/pacotes';
+        return $this->conferir($this->doc . '/pacotes', $this->doc);
     }
 
     /** O pai, se já existe, tem de resolver para dentro da base (um link no meio do caminho vira recusa). */
     private function conferir(string $caminho, string $base): string
     {
+        // B-11: a FOLHA também não pode ser link (um rename de/para um link atravessaria a base).
+        if (is_link($caminho)) {
+            throw new Recusa('caminho_fora_da_base', $caminho);
+        }
         $pai = dirname($caminho);
         while (!file_exists($pai) && !is_link($pai) && $pai !== dirname($pai)) {
             $pai = dirname($pai);

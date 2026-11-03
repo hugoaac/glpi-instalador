@@ -7,19 +7,23 @@ namespace GlpiPlugin\Instalador;
 /**
  * Regra R1 com proveniência (desenho-m2 §5.4, D2-01, D2-09). O instalador só escreve em GLPI_MARKETPLACE_DIR
  * e recusa a chave que exista em outro lugar, ou que esteja no marketplace sem ter sido posta por ele.
+ *
+ * B-02: a proveniência vem de um fato ASSINADO, não de linha de banco. A pasta marketplace/<chave> tem de ter a
+ * arvore_sha256 de um manifesto assinado guardado (reverificado agora); a versão instalada ("de") é a desse
+ * manifesto. Operação SUCESSO forjada no banco, ou glpi_plugins.version rebaixada, não valem nada aqui.
  */
 final class R1
 {
-    public const OK                = 'OK';
-    public const GERENCIADO        = 'GERENCIADO_EM_OUTRO_LUGAR';
+    public const OK         = 'OK';
+    public const GERENCIADO = 'GERENCIADO_EM_OUTRO_LUGAR';
 
-    /** @return array{resultado:string,motivo:string} */
-    public static function avaliar(Contexto $ctx, Armazem $armazem, string $chave): array
+    /** @return array{resultado:string,motivo:string,de:?string,zip_sha256:?string} */
+    public static function avaliar(Contexto $ctx, Armazem $armazem, Assinatura $assinatura, string $chave): array
     {
         if (preg_match(Manifesto::RE_CHAVE, $chave) !== 1) {
             throw new Recusa('chave', 'chave inválida em R1');
         }
-        $nao = static fn(string $motivo): array => ['resultado' => self::GERENCIADO, 'motivo' => $motivo];
+        $nao = static fn(string $motivo): array => ['resultado' => self::GERENCIADO, 'motivo' => $motivo, 'de' => null, 'zip_sha256' => null];
 
         if (in_array($chave, Manifesto::CHAVES_PROIBIDAS, true)) {
             return $nao('dependencia_do_instalador'); // D2-09: troca manual
@@ -46,15 +50,17 @@ final class R1
             if (!is_dir($alvo) || Arvore::temVcsOuLink($alvo)) {
                 return $nao('vcs_ou_link_no_marketplace');
             }
-            // D2-01a: proveniência. O que está lá tem de ser exatamente o que a última operação deixou.
-            $ult = $armazem->ultimaOperacaoOk($chave);
-            if ($ult === null || ($ult['arvore_final'] ?? null) === null || Arvore::pasta($alvo) !== $ult['arvore_final']) {
+            $fato = Fatos::instalado($armazem, $assinatura, $chave, Arvore::pasta($alvo));
+            if ($fato === null) {
                 return $nao('marketplace_sem_origem');
             }
-        } elseif ($armazem->registroPlugin($chave) !== null) {
+
+            return ['resultado' => self::OK, 'motivo' => '', 'de' => $fato['versao'], 'zip_sha256' => $fato['zip_sha256']];
+        }
+        if ($armazem->registroPlugin($chave) !== null) {
             return $nao('registro_sem_pasta');
         }
 
-        return ['resultado' => self::OK, 'motivo' => ''];
+        return ['resultado' => self::OK, 'motivo' => '', 'de' => null, 'zip_sha256' => null];
     }
 }

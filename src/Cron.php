@@ -19,7 +19,8 @@ use Toolbox;
 final class Cron
 {
     public const TASK = 'InstaladorExecutor';
-    public const LOCK = 'glpi_instalador_exec';
+    /** B-03: o nome do lock inclui o banco; GET_LOCK vale para o servidor inteiro e dois GLPI no mesmo MySQL se bloqueariam. */
+    public const LOCK_NOME_SQL = "CONCAT('glpi_instalador_exec:', SHA1(DATABASE()))";
     private const LOG = 'instalador';
 
     /** @return array<string,string> */
@@ -56,9 +57,10 @@ final class Cron
         if ($mp === false || $fh === false) {
             return 0;
         }
-        // O processo que cria arquivos tem de ser o dono do marketplace (senão o www-data do FPM não o enxerga).
-        if (fileowner($lockPath) !== fileowner($mp)) {
-            Toolbox::logInFile(self::LOG, "dono do cron (uid " . fileowner($lockPath) . ") diferente do dono do marketplace (uid " . fileowner($mp) . "): nada feito\n");
+        // B-06: confere o euid do PROCESSO (não o dono de um lock antigo): nunca root, e igual ao dono do marketplace.
+        $euid = function_exists('posix_geteuid') ? posix_geteuid() : -1;
+        if (!self::euidOk($euid, (int) fileowner($mp))) {
+            Toolbox::logInFile(self::LOG, "euid do cron ($euid) não é o dono do marketplace (uid " . fileowner($mp) . ") ou é root: nada feito\n");
             fclose($fh);
 
             return 0;
@@ -70,7 +72,7 @@ final class Cron
         }
         $temLock = false;
         try {
-            $res = $DB->doQuery("SELECT GET_LOCK('" . self::LOCK . "', 0) AS l");
+            $res = $DB->doQuery('SELECT GET_LOCK(' . self::LOCK_NOME_SQL . ', 0) AS l');
             $row = $res ? $res->fetch_assoc() : null;
             if ((int) ($row['l'] ?? 0) !== 1) {
                 return 0; // outro nó/processo está rodando
@@ -84,17 +86,29 @@ final class Cron
             return 0;
         } finally {
             if ($temLock) {
-                $DB->doQuery("SELECT RELEASE_LOCK('" . self::LOCK . "')");
+                $DB->doQuery('SELECT RELEASE_LOCK(' . self::LOCK_NOME_SQL . ')');
             }
             flock($fh, LOCK_UN);
             fclose($fh);
         }
     }
 
+    /** O processo tem de ser o dono do marketplace e nunca root (uma falha no parser rodaria com privilégio máximo). */
+    public static function euidOk(int $euid, int $donoMarketplace): bool
+    {
+        return $euid > 0 && $euid === $donoMarketplace;
+    }
+
     private static function rodada(CronTask $task): int
     {
         $feito = 0;
         $arm = Servico::armazem();
+        $ctx = Contexto::doGlpi();
+        // B-07: PREPARANDO esquecido (kill -9, OOM) vira FALHA 'interrompida' e libera a chave.
+        $n = Retomada::reconciliar($arm, new Caminhos($ctx->marketplace, $ctx->docDir));
+        if ($n > 0) {
+            $task->log("$n operação(ões) interrompida(s) marcada(s) como FALHA");
+        }
         // no máximo uma operação por rodada
         foreach ($arm->operacoesPorEstado(['PEDIDA']) as $op) {
             $r = Servico::preparador()->preparar((int) $op['id']);

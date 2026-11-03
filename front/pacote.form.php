@@ -15,6 +15,7 @@ use GlpiPlugin\Instalador\Manifesto;
 use GlpiPlugin\Instalador\Recebimento;
 use GlpiPlugin\Instalador\Recusa;
 use GlpiPlugin\Instalador\Servico;
+use GlpiPlugin\Instalador\Texto;
 
 include('../../../inc/includes.php');
 
@@ -57,22 +58,20 @@ try {
                     $tmpZip,
                     (string) file_get_contents((string) $f['manifesto']['tmp_name']),
                     (string) file_get_contents((string) $f['sig']['tmp_name']),
+                    Servico::espelho($ctx),
                 );
             } finally {
                 if (is_file($tmpZip)) {
                     @unlink($tmpZip);
                 }
             }
-            Session::addMessageAfterRedirect('Pacote ' . $r['manifesto']['chave'] . ' ' . $r['manifesto']['versao'] . ' verificado e guardado.', false, INFO);
+            Session::addMessageAfterRedirect('Pacote ' . Texto::esc($r['manifesto']['chave']) . ' ' . Texto::esc($r['manifesto']['versao']) . ' verificado e guardado.', false, INFO);
             break;
 
         case 'catalogo':
+            // B-05: o GLPI imprime a mensagem com |raw; todo texto dinâmico (inclusive o do cURL) passa por Texto::esc.
             $c = Servico::atualizarCatalogo();
-            if ($c['ok']) {
-                Session::addMessageAfterRedirect('Catálogo: ' . $c['novos'] . ' novo(s), ' . $c['conhecidos'] . ' conhecido(s), ' . count($c['rejeitados']) . ' rejeitado(s), ' . $c['retirados'] . ' marcado(s) como retirado.', false, INFO);
-            } else {
-                Session::addMessageAfterRedirect('Catálogo indisponível: ' . ($c['erro'] ?? '?'), false, ERROR);
-            }
+            Session::addMessageAfterRedirect(Texto::catalogo($c), false, $c['ok'] ? INFO : ERROR);
             break;
 
         case 'pedir':
@@ -84,7 +83,7 @@ try {
             Session::addMessageAfterRedirect('Ação desconhecida.', false, ERROR);
     }
 } catch (Recusa $e) {
-    Session::addMessageAfterRedirect('Recusado: ' . $e->motivo . ($e->getMessage() !== $e->motivo ? ' (' . $e->getMessage() . ')' : ''), false, ERROR);
+    Session::addMessageAfterRedirect(Texto::recusa($e), false, ERROR);
 } catch (Throwable $e) {
     Toolbox::logInFile('instalador', 'pacote.form.php: ' . get_class($e) . ': ' . $e->getMessage() . "\n");
     Session::addMessageAfterRedirect('Falha inesperada (veja files/_log/instalador.log).', false, ERROR);

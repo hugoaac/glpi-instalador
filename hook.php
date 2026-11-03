@@ -79,12 +79,14 @@ function plugin_instalador_install(): bool
             `filho_pid` int {$sign} DEFAULT NULL,
             `arvore_final` char(64) DEFAULT NULL,
             `bloqueia_chave` tinyint NOT NULL DEFAULT 0,
+            `aberta_chave` varchar(64) GENERATED ALWAYS AS (CASE WHEN `estado` IN ('FALHA','CONCLUIDA') THEN NULL ELSE `chave` END) VIRTUAL,
             `resolvido_por` int {$sign} DEFAULT NULL,
             `resolvido_em` timestamp NULL DEFAULT NULL,
             `resolucao` varchar(255) DEFAULT NULL,
             `date_creation` timestamp NULL DEFAULT NULL,
             `date_mod` timestamp NULL DEFAULT NULL,
             PRIMARY KEY (`id`),
+            UNIQUE KEY `aberta_chave` (`aberta_chave`),
             KEY `chave` (`chave`),
             KEY `estado` (`estado`)
         ) ENGINE=InnoDB DEFAULT CHARSET={$charset} COLLATE={$collate} ROW_FORMAT=DYNAMIC");

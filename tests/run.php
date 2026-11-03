@@ -157,19 +157,20 @@ function cenario(string $base, ?string $marketplace = null): array
     $doc = $base . '/doc';
     @mkdir($mp, 0755, true);
     @mkdir($doc, 0700, true);
-    $ctx = new Contexto(realpath($mp), [realpath($mp), $base . '/plugins'], null, '11.0.8', 1, true, realpath($doc));
+    $dirs = [realpath($mp), $base . '/plugins'];
+    $ctx = new Contexto(realpath($mp), $dirs, $dirs, '11.0.8', 1, true, realpath($doc)); // B-09: o FPM já gravou a sua visão
 
     return [$ctx, new ArmazemMemoria(), new Caminhos(realpath($mp), realpath($doc))];
 }
-function pedir(ArmazemMemoria $arm, Caminhos $cam, string $zip, string $mb, string $sb, array $m): int
+function pedir(ArmazemMemoria $arm, Caminhos $cam, string $zip, string $mb, string $sb, array $m, string $origem = 'upload', bool $copiar = true): int
 {
     @mkdir($cam->pastaPacotes(), 0700, true);
     $dest = $cam->zip($m['zip_sha256']);
-    if (!is_file($dest)) {
+    if ($copiar && !is_file($dest)) {
         copy($zip, $dest);
     }
     $pid = $arm->inserirPacote(['chave' => $m['chave'], 'versao' => $m['versao'], 'zip_sha256' => $m['zip_sha256'],
-        'manifesto' => base64_encode($mb), 'sig' => base64_encode($sb), 'key_id' => 'x', 'origem' => 'upload']);
+        'manifesto' => base64_encode($mb), 'sig' => base64_encode($sb), 'key_id' => 'x', 'origem' => $origem]);
 
     return $arm->criarOperacao(['chave' => $m['chave'], 'pacotes_id' => $pid, 'tipo' => 'INSTALAR']);
 }
@@ -359,135 +360,12 @@ if (grupo('preparar')) {
     $op = $arm3->criarOperacao(['chave' => 'subticket', 'pacotes_id' => $pid, 'tipo' => 'INSTALAR']);
     $antes = listar($ctx->marketplace);
     $res = (new Preparador($ctx, $arm3, $ass))->preparar($op);
-    eq([$res['estado'], $res['motivo']], ['FALHA', 'zip_sha256'], 'zip com 1 byte trocado -> FALHA zip_sha256');
+    eq([$res['estado'], $res['motivo']], ['FALHA', 'zip_ausente'], 'B-01: zip adulterado em disco (origem upload) é apagado e, sem painel, vira zip_ausente');
+    ok(!is_file($dest), 'B-01: o zip envenenado não fica no nome definitivo');
     eq(listar($ctx->marketplace), $antes, 'marketplace/ idêntico antes e depois do zip adulterado');
     // chave fora da lista: pacote assinado por outra semente
     [$mb, $sb] = embalar("$fx/arvore-m1.zip", ['arvore_sha256' => 'e67b4d9203a36b1aecedae3b4eb7aa4ea3f459454aa7764dd8e3c0bd8cafa045']);
     eq(motivo(fn() => $ass->verificar($mb, $sb)), 'key_id', 'assinatura de chave fora da lista -> key_id');
-}
-
-// ======================================================================== r1
-if (grupo('r1')) {
-    $base = "$tmp/r1";
-    mkdir($base, 0700, true);
-    [$ctx, $arm] = cenario($base);
-    $mp = $ctx->marketplace;
-    eq(R1::avaliar($ctx, $arm, 'novo')['resultado'], 'OK', 'chave nova: OK');
-    mkdir("$base/plugins/x", 0755, true);
-    eq(R1::avaliar($ctx, $arm, 'x'), ['resultado' => 'GERENCIADO_EM_OUTRO_LUGAR', 'motivo' => 'existe_fora_do_marketplace'], 'plugins/x existe -> GERENCIADO_EM_OUTRO_LUGAR');
-    foreach (['instalador', 'informante'] as $k) {
-        eq(R1::avaliar($ctx, $arm, $k), ['resultado' => 'GERENCIADO_EM_OUTRO_LUGAR', 'motivo' => 'dependencia_do_instalador'], "recusa fixa: $k");
-    }
-    eq(motivo(fn() => R1::avaliar($ctx, $arm, '../x')), 'chave', 'chave com ../ é recusada antes de virar caminho');
-    // VCS no marketplace
-    mkdir("$mp/comgit/.git", 0755, true);
-    eq(R1::avaliar($ctx, $arm, 'comgit')['motivo'], 'vcs_ou_link_no_marketplace', 'marketplace/<chave>/.git -> GERENCIADO');
-    // link
-    @symlink("$base/plugins/x", "$mp/lnk");
-    eq(R1::avaliar($ctx, $arm, 'lnk')['motivo'], 'link_no_marketplace', 'marketplace/<chave> é link -> GERENCIADO');
-    // proveniência (D2-01)
-    mkdir("$mp/semorigem", 0755, true);
-    file_put_contents("$mp/semorigem/setup.php", '<?php');
-    eq(R1::avaliar($ctx, $arm, 'semorigem')['motivo'], 'marketplace_sem_origem', 'marketplace/x sem histórico -> marketplace_sem_origem');
-    mkdir("$mp/comorigem", 0755, true);
-    file_put_contents("$mp/comorigem/setup.php", '<?php');
-    $arv = Arvore::pasta("$mp/comorigem");
-    $arm->operacoes[1] = ['id' => 1, 'chave' => 'comorigem', 'resultado' => 'SUCESSO', 'arvore_final' => $arv, 'estado' => 'CONCLUIDA'];
-    eq(R1::avaliar($ctx, $arm, 'comorigem')['resultado'], 'OK', 'com histórico e arvore igual -> OK');
-    file_put_contents("$mp/comorigem/setup.php", '<?php // editado');
-    eq(R1::avaliar($ctx, $arm, 'comorigem')['motivo'], 'marketplace_sem_origem', 'com histórico e arvore DIFERENTE (edição manual) -> recusa');
-    // INSTALADO_SEM_VALIDAR também conta; INCERTO/FALHA não
-    $arm->operacoes[1]['resultado'] = 'FALHA';
-    file_put_contents("$mp/comorigem/setup.php", '<?php');
-    eq(R1::avaliar($ctx, $arm, 'comorigem')['motivo'], 'marketplace_sem_origem', 'última operação FALHA não dá proveniência');
-    $arm->operacoes[1]['resultado'] = 'INSTALADO_SEM_VALIDAR';
-    eq(R1::avaliar($ctx, $arm, 'comorigem')['resultado'], 'OK', 'INSTALADO_SEM_VALIDAR dá proveniência');
-    // linha em glpi_plugins sem pasta
-    $arm->plugins['orfao'] = ['version' => '1.0.0', 'state' => 1];
-    eq(R1::avaliar($ctx, $arm, 'orfao')['motivo'], 'registro_sem_pasta', 'linha em glpi_plugins sem pasta -> recusa');
-}
-
-// ======================================================================== versao
-if (grupo('versao')) {
-    eq(Manifesto::compararVersao('1.10.0', '1.9.9'), 1, 'semver numérico: 1.10.0 > 1.9.9');
-    eq(Manifesto::compararVersao('1.2.1', '1.2.1'), 0, 'igual');
-    eq(Manifesto::compararVersao('0.9.9', '1.0.0'), -1, 'menor');
-    eq(Plano::dentroDaFaixa('11.0.8', '11.0.0', null), true, 'glpi_max nulo: mesmo major do min');
-    eq(Plano::dentroDaFaixa('12.0.0', '11.0.0', null), false, 'glpi_max nulo: major seguinte fora');
-    eq(Plano::dentroDaFaixa('11.0.8', '11.0.9', null), false, 'abaixo do min');
-    eq(Plano::dentroDaFaixa('11.0.8', '11.0.0', '11.0.8'), false, 'glpi_max é exclusivo (Plugin.php:2361)');
-
-    $base = "$tmp/versao";
-    mkdir($base, 0700, true);
-    [$ctx, $arm, $cam] = cenario($base);
-    $ass  = new Assinatura($chaveTeste);
-    $zip  = "$fx/arvore-m1.zip";
-    $ARV  = 'e67b4d9203a36b1aecedae3b4eb7aa4ea3f459454aa7764dd8e3c0bd8cafa045';
-    $rodar = static function (string $versao, array $armCampos = [], array $sobre = []) use ($ctx, $cam, $ass, $zip, $ARV): array {
-        global $skTeste;
-        $arm = new ArmazemMemoria();
-        foreach ($armCampos as $k => $v) {
-            $arm->$k = $v;
-        }
-        [$mb, $sb, $m] = embalar($zip, ['versao' => $versao, 'arvore_sha256' => $ARV] + $sobre);
-        $op = pedir($arm, $cam, $zip, $mb, $sb, $m);
-        $r  = (new Preparador($ctx, $arm, $ass))->preparar($op);
-        Extrator::apagar($cam->stagingOp($op));
-        @rmdir($cam->stagingRaiz());
-
-        return [$r, $arm, $op];
-    };
-    [$r] = $rodar('1.0.0', ['plugins' => ['teste' => ['version' => '1.2.0', 'state' => 1]]]);
-    // linha em glpi_plugins sem pasta é R1 antes do downgrade
-    eq([$r['resultado'], $r['motivo']], ['GERENCIADO_EM_OUTRO_LUGAR', 'registro_sem_pasta'], 'versão instalada sem pasta no marketplace é recusada pela R1');
-    // downgrade com pasta + proveniência
-    mkdir($ctx->marketplace . '/teste', 0755, true);
-    file_put_contents($ctx->marketplace . '/teste/setup.php', '<?php');
-    $arvM = Arvore::pasta($ctx->marketplace . '/teste');
-    $hist = [1 => ['id' => 1, 'chave' => 'teste', 'resultado' => 'SUCESSO', 'arvore_final' => $arvM, 'estado' => 'CONCLUIDA', 'pacotes_id' => 0]];
-    $inst = ['teste' => ['version' => '1.2.0', 'state' => 1]];
-    [$r] = $rodar('1.0.0', ['plugins' => $inst, 'operacoes' => $hist]);
-    eq([$r['estado'], $r['motivo']], ['FALHA', 'downgrade'], 'versão menor que a instalada -> FALHA downgrade');
-    [$r] = $rodar('1.2.0', ['plugins' => $inst, 'operacoes' => $hist]);
-    eq([$r['estado'], $r['motivo']], ['FALHA', 'mesma_versao'], 'mesma versão, hash diferente do instalado -> FALHA mesma_versao');
-    [$r, $a2, $op2] = $rodar('1.3.0', ['plugins' => $inst, 'operacoes' => $hist]);
-    eq([$r['estado'], $r['plano']['tipo'], $r['plano']['de'], $r['plano']['para']], ['PLANO_PRONTO', 'ATUALIZAR', '1.2.0', '1.3.0'], 'versão maior -> ATUALIZAR 1.2.0 -> 1.3.0');
-    // JA_NO_ALVO: a última operação instalou exatamente este hash
-    $arm4 = new ArmazemMemoria();
-    [$mb, $sb, $m] = embalar($zip, ['versao' => '1.2.0', 'arvore_sha256' => $ARV]);
-    $op = pedir($arm4, $cam, $zip, $mb, $sb, $m);
-    $arm4->plugins = $inst;
-    $arm4->operacoes[99] = ['id' => 99, 'chave' => 'teste', 'resultado' => 'SUCESSO', 'arvore_final' => $arvM, 'estado' => 'CONCLUIDA', 'pacotes_id' => 1];
-    $r = (new Preparador($ctx, $arm4, $ass))->preparar($op);
-    eq([$r['estado'], $r['resultado']], ['CONCLUIDA', 'JA_NO_ALVO'], 'mesma versão e mesmo hash -> JA_NO_ALVO');
-    rrmdir($ctx->marketplace . '/teste');
-    // versoes_vistas (D2-03 + P-2)
-    [$r, $a5] = $rodar('1.0.0', ['vistas' => ['teste' => ['versao_max' => '2.0.0', 'zip_sha256' => str_repeat('1', 64)]]]);
-    eq([$r['estado'], $r['plano']['abaixo_da_mais_nova'], $r['plano']['versao_mais_nova_conhecida']], ['PLANO_PRONTO', true, '2.0.0'], 'instalação nova abaixo da mais nova vista: plano exige o 2º checkbox');
-    [$r, $a6] = $rodar('1.0.0');
-    eq([$a6->vistas['teste']['versao_max'] ?? null, $r['plano']['abaixo_da_mais_nova']], ['1.0.0', false], 'Preparar registra versoes_vistas');
-    // índice único (chave, versao) — D2-19
-    $a7 = new ArmazemMemoria();
-    $a7->inserirPacote(['chave' => 'teste', 'versao' => '1.0.0', 'zip_sha256' => str_repeat('a', 64), 'manifesto' => '', 'sig' => '', 'key_id' => 'x', 'origem' => 'upload']);
-    eq(motivo(fn() => $a7->inserirPacote(['chave' => 'teste', 'versao' => '1.0.0', 'zip_sha256' => str_repeat('b', 64), 'manifesto' => '', 'sig' => '', 'key_id' => 'x', 'origem' => 'upload'])), 'mesma_versao', '(chave, versao) com 2º hash -> mesma_versao');
-    // faixa do GLPI
-    [$r] = $rodar('1.0.0', [], ['glpi_min' => '12.0.0']);
-    eq([$r['estado'], $r['motivo']], ['FALHA', 'glpi_fora_da_faixa'], 'glpi_min acima do GLPI -> FALHA glpi_fora_da_faixa');
-    // retirado
-    $a8 = new ArmazemMemoria();
-    [$mb, $sb, $m] = embalar($zip, ['arvore_sha256' => $ARV]);
-    $op = pedir($a8, $cam, $zip, $mb, $sb, $m);
-    $a8->marcarRetirados([$m['zip_sha256']]);
-    $r = (new Preparador($ctx, $a8, $ass))->preparar($op);
-    eq([$r['estado'], $r['motivo']], ['FALHA', 'retirado'], 'pacote retirado -> FALHA retirado');
-    // operação que não está PEDIDA não roda duas vezes
-    eq((new Preparador($ctx, $a8, $ass))->preparar($op)['estado'], 'IGNORADA', 'Preparar de operação já tratada é ignorado (transição condicional)');
-    // diretórios CLI x FPM
-    $ctxFpm = new Contexto($ctx->marketplace, $ctx->pluginsDirs, ['/outro'], '11.0.8', 1, true, $ctx->docDir);
-    $a9 = new ArmazemMemoria();
-    $op = pedir($a9, $cam, $zip, $mb, $sb, $m);
-    $r = (new Preparador($ctxFpm, $a9, $ass))->preparar($op);
-    eq([$r['estado'], $r['motivo']], ['FALHA', 'diretorios_cli_fpm'], 'CLI e FPM com diretórios diferentes -> FALHA diretorios_cli_fpm');
 }
 
 // ======================================================================== plano
@@ -609,22 +487,12 @@ if (grupo('guardas')) {
     symlink("$base/fora", "$base/mp/.hub-staging");
     eq(motivo(fn() => $cam->S('teste', 1)), 'caminho_fora_da_base', 'pai que é link para fora da base -> caminho_fora_da_base');
     unlink("$base/mp/.hub-staging");
-    // o código de src/ não carrega nada do pacote nem executa
-    $proibidos = ['proc_open', 'shell_exec', 'exec(', 'passthru', 'system(', 'popen(', 'eval(', 'include ', 'require '];
-    $achados = [];
-    foreach (glob(__DIR__ . '/../src/*.php') as $f) {
-        $txt = (string) file_get_contents($f);
-        foreach ($proibidos as $p) {
-            if (str_contains(preg_replace('#/\*.*?\*/|//[^\n]*#s', '', $txt), $p)) {
-                $achados[] = basename($f) . ':' . $p;
-            }
-        }
-    }
-    eq($achados, [], 'fatia (b): nenhum código de execução em src/ (sem proc_open/exec/eval/include)');
     // nenhuma API de configuração acrescenta chave
     $txt = (string) file_get_contents(__DIR__ . '/../src/Publicadores.php');
     ok(!str_contains($txt, 'getenv') && !str_contains($txt, 'Config::'), 'Publicadores não lê ambiente nem configuração');
 }
+
+require __DIR__ . '/grupos-b.php';
 
 echo "\n$pass passaram, $fail falharam\n";
 exit($fail === 0 ? 0 : 1);
