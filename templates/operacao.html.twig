@@ -1,0 +1,38 @@
+<div class="container-fluid" style="max-width: 1000px">
+    <p><a href="{{ volta }}">&larr; voltar</a></p>
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Operação #{{ op.id }}: {{ op.chave }} {{ op.versao_para }}</h3></div>
+        <div class="card-body">
+            <p>Estado: <strong>{{ op.estado }}</strong>{% if op.resultado %} &middot; resultado: <strong>{{ op.resultado }}</strong>{% endif %}{% if op.motivo %} &middot; motivo: <code>{{ op.motivo }}</code>{% endif %}</p>
+            {% if op.estado == 'PLANO_PRONTO' %}
+                <div class="alert alert-warning">Plano em <strong>modo simulação</strong>. Nesta versão (fatia b) não há botão de aprovar: a execução é da fatia c.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if plano %}
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Plano (simulação)</h3></div>
+        <table class="table table-sm">
+            <tr><th>Tipo</th><td>{{ plano.tipo }}: {{ plano.de ?? '(instalação nova)' }} &rarr; {{ plano.para }}</td></tr>
+            <tr><th>Migração declarada</th><td>{{ plano.migracao }}{% if plano.tabelas_core_tocadas %} &middot; tabelas do core: {{ plano.tabelas_core_tocadas|join(', ') }}{% endif %}</td></tr>
+            <tr><th>R1 (regra de pasta única)</th><td>{{ plano.r1.resultado }}{% if plano.r1.motivo %} ({{ plano.r1.motivo }}){% endif %}</td></tr>
+            <tr><th>Pacote</th><td>commit <code>{{ plano.pacote.commit|slice(0, 10) }}</code>, chave de publicador <code>{{ plano.pacote.key_id }}</code>, publicado em {{ plano.pacote.publicado_em }}<br>zip <code>{{ plano.pacote.zip_sha256 }}</code><br>árvore <code>{{ plano.pacote.arvore_sha256 }}</code></td></tr>
+            <tr><th>GLPI</th><td>{{ plano.glpi.atual }} (pacote: de {{ plano.glpi.min }} {% if plano.glpi.max %}até antes de {{ plano.glpi.max }}{% else %}no mesmo major{% endif %}) &middot; {{ plano.glpi.faixa_ok ? 'dentro da faixa' : 'FORA da faixa' }}</td></tr>
+            <tr><th>Diretórios CLI &times; FPM</th><td>{% if plano.diretorios.iguais is same as(true) %}iguais{% elseif plano.diretorios.iguais is same as(false) %}<strong class="text-danger">DIFERENTES</strong>{% else %}FPM ainda não visto{% endif %}: {{ plano.diretorios.cli|join(' , ') }}</td></tr>
+            <tr><th>opcache.validate_timestamps</th><td>{{ plano.opcache_validate_timestamps is null ? 'desconhecido' : (plano.opcache_validate_timestamps ? 'ligado' : 'DESLIGADO: depois da troca é preciso reiniciar o FPM') }}</td></tr>
+            <tr><th>cron_limit</th><td>{{ plano.cron_limit }}{% if plano.cron_limit_aviso %} <div class="alert alert-warning mt-1 mb-0">{{ plano.cron_limit_aviso }}</div>{% endif %}</td></tr>
+            <tr><th>Versão mais nova já vista</th><td>{{ plano.versao_mais_nova_conhecida ?? '-' }}{% if plano.abaixo_da_mais_nova %} <div class="alert alert-danger mt-1 mb-0">Este pacote é <strong>mais antigo</strong> que a mais nova conhecida. A aprovação (fatia c) exigirá confirmação própria.</div>{% endif %}</td></tr>
+            <tr><th>Backup que a execução faria</th><td>
+                <div class="text-danger">{{ plano.backup.sensivel }}</div>
+                <div class="text-muted">Retenção: {{ plano.backup.retencao }}</div>
+                Tabelas do plugin hoje: {% for t in plano.backup.tabelas_do_plugin %}<code>{{ t.tabela }}</code> ({{ t.linhas }}) {% else %}nenhuma{% endfor %}
+                <ul class="mb-0">{% for l in plano.backup.linhas_do_core %}<li><code>{{ l.tabela }}</code>: {{ l.seletor }}</li>{% endfor %}</ul>
+            </td></tr>
+            <tr><th>Disco</th><td>necessário (estimativa): {{ (plano.disco.necessario / 1048576)|round(1) }} MiB &middot; livre em marketplace/: {{ disco_livre is null ? 'desconhecido' : ((disco_livre / 1048576)|round(0)) ~ ' MiB' }}</td></tr>
+            <tr><th>plano_sha256</th><td><code>{{ op.plano_sha256 }}</code></td></tr>
+        </table>
+        <div class="card-body"><details><summary>JSON do plano</summary><pre>{{ plano_json }}</pre></details></div>
+    </div>
+    {% endif %}
+</div>

@@ -1,0 +1,100 @@
+<div class="container-fluid" style="max-width: 1100px">
+    <div class="alert alert-info">
+        <strong>Instalador {{ versao }} (fatia b)</strong>: verifica pacotes assinados e mostra o plano.
+        Esta versão <strong>não instala, não troca pasta, não migra e não ativa</strong>.
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Requisitos</h3></div>
+        <ul class="list-group list-group-flush">
+            {% for r in requisitos %}
+                <li class="list-group-item">
+                    {% if r.ok is same as(true) %}<span class="badge bg-green-lt">ok</span>
+                    {% elseif r.ok is same as(false) %}<span class="badge bg-red-lt">falta</span>
+                    {% else %}<span class="badge bg-yellow-lt">?</span>{% endif %}
+                    {{ r.nome }} <span class="text-muted">&mdash; {{ r.detalhe }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Pacotes conhecidos</h3></div>
+        <div class="card-body">
+            <p class="text-muted">
+                Catálogo online: última tentativa {{ catalogo_em }}.
+                {% if catalogo %}
+                    {% if catalogo.ok %}Resultado: {{ catalogo.novos }} novo(s), {{ catalogo.conhecidos }} conhecido(s), {{ catalogo.rejeitados|length }} rejeitado(s), {{ catalogo.retirados }} marcado(s) como retirado.
+                    {% else %}<span class="text-danger">Falhou: {{ catalogo.erro }}</span>{% endif %}
+                {% endif %}
+            </p>
+            {% if pode_editar %}
+                <form method="post" action="{{ acao }}" class="mb-3">
+                    <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="acao" value="catalogo">
+                    <button class="btn btn-outline-primary btn-sm" type="submit">Atualizar catálogo agora</button>
+                </form>
+            {% endif %}
+            <table class="table table-sm">
+                <thead><tr><th>Chave</th><th>Versão</th><th>Origem</th><th>sha256 do zip</th><th>Estado</th><th></th></tr></thead>
+                <tbody>
+                {% for p in pacotes %}
+                    <tr>
+                        <td>{{ p.chave }}</td>
+                        <td>{{ p.versao }}{% if p.mais_nova and p.mais_nova != p.versao %} <span class="text-muted">(mais nova vista: {{ p.mais_nova }})</span>{% endif %}</td>
+                        <td>{{ p.origem }}</td>
+                        <td><code>{{ p.zip_sha256|slice(0, 12) }}…</code></td>
+                        <td>{% if p.retirado %}<span class="badge bg-red-lt">retirado</span>{% else %}<span class="badge bg-green-lt">assinatura ok</span>{% endif %}</td>
+                        <td>
+                            {% if pode_editar and not p.retirado %}
+                                <form method="post" action="{{ acao }}">
+                                    <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="acao" value="pedir">
+                                    <input type="hidden" name="pacotes_id" value="{{ p.id }}">
+                                    <button class="btn btn-sm btn-primary" type="submit">Preparar e planejar</button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="6" class="text-muted">Nenhum pacote. Atualize o catálogo ou envie os três arquivos abaixo.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if pode_editar %}
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Enviar pacote (modo offline)</h3></div>
+        <form method="post" action="{{ acao }}" enctype="multipart/form-data">
+            <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="acao" value="upload">
+            <div class="card-body">
+                <p class="text-muted">Os três arquivos do release, byte a byte: <code>&lt;chave&gt;-&lt;versao&gt;.zip</code>, <code>.manifesto.json</code> e <code>.sig</code>. O nome não carrega confiança: vale a assinatura.</p>
+                <div class="mb-2"><label class="form-label">zip</label><input class="form-control" type="file" name="zip" required></div>
+                <div class="mb-2"><label class="form-label">manifesto.json</label><input class="form-control" type="file" name="manifesto" required></div>
+                <div class="mb-2"><label class="form-label">sig</label><input class="form-control" type="file" name="sig" required></div>
+            </div>
+            <div class="card-footer"><button class="btn btn-primary" type="submit">Verificar e guardar</button></div>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Operações</h3></div>
+        <table class="table table-sm">
+            <thead><tr><th>#</th><th>Chave</th><th>Para</th><th>Estado</th><th>Resultado</th><th>Motivo</th><th>Criada</th></tr></thead>
+            <tbody>
+            {% for o in operacoes %}
+                <tr>
+                    <td><a href="{{ url_operacao }}?id={{ o.id }}">{{ o.id }}</a></td>
+                    <td>{{ o.chave }}</td><td>{{ o.versao_para }}</td><td>{{ o.estado }}</td><td>{{ o.resultado }}</td><td>{{ o.motivo }}</td><td>{{ o.date_creation }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="text-muted">Nenhuma operação.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>

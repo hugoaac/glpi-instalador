@@ -1,0 +1,1 @@
+{"formato":"glpi-plugin-assinatura-v1","key_id":"38f6f9ceaa9c094c","assinatura":"1ms51kqkR3wFDkvRgB4EbPK2OyQUKVmWlYGhaeKxQJgms/SEXRQAHaQP0As1kZfRut2CVWL6h3zJZrMSNKZECg=="}
