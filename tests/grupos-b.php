@@ -190,6 +190,12 @@ if (grupo('r1')) {
     $mf = \GlpiPlugin\Instalador\Manifesto::serializar($pf);
     $arm->inserirPacote(['chave' => 'teste', 'versao' => '1.2.0', 'zip_sha256' => $m2['zip_sha256'], 'manifesto' => base64_encode($mf), 'sig' => base64_encode($sb), 'key_id' => 'x', 'origem' => 'upload']);
     eq(R1::avaliar($ctx, $arm, $ass, 'teste')['motivo'], 'marketplace_sem_origem', 'B-02: manifesto reescrito no banco é reverificado e recusado');
+    // A linha do banco tem de ser a do manifesto assinado que ela guarda: chave, versão ou zip reescritos não valem.
+    $linha = ['chave' => 'teste', 'versao' => '1.2.0', 'zip_sha256' => $m['zip_sha256'], 'manifesto' => base64_encode($mb), 'sig' => base64_encode($sb)];
+    eq(\GlpiPlugin\Instalador\Fatos::manifesto($ass, $linha)['versao'] ?? null, '1.2.0', 'linha íntegra: o manifesto reverificado vale');
+    foreach (['chave' => 'outro', 'versao' => '9.9.9', 'zip_sha256' => str_repeat('f', 64)] as $campo => $valor) {
+        eq(\GlpiPlugin\Instalador\Fatos::manifesto($ass, [$campo => $valor] + $linha), null, "B-02: $campo reescrito na linha do banco não bate com o manifesto assinado");
+    }
     $arm2 = new ArmazemMemoria();
     $arm2->plugins['orfao'] = ['version' => '1.0.0', 'state' => 1];
     eq(R1::avaliar($ctx, $arm2, $ass, 'orfao')['motivo'], 'registro_sem_pasta', 'linha em glpi_plugins sem pasta -> recusa');
