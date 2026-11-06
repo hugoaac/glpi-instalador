@@ -56,3 +56,14 @@ Ficam para a fatia (c): B-12, P-4, P-5, P-6. Não feitos: B-13 (só texto no des
 
 Testado (executado): `php tests/run.php` 261 asserções, 0 falhas (informante 87). 18 mutações novas no instalador, 17 pegas e 1 equivalente (B-01a: a conferência final após o rename apaga o arquivo, então o efeito observável é o mesmo; a ordem tmp-antes-do-rename não é observável por teste). Smoke no GLPI local: install/activate/uninstall; a coluna gerada `aberta_chave` com UNIQUE recusa a 2ª operação aberta na mesma chave e libera após fechar; `$DB->insert` duplicado lança `RuntimeException` (confirma o B-10); `GET_LOCK` com o nome novo devolve 1.
 Não testado: `GET_LOCK` com dois bancos diferentes no mesmo servidor; o cron como root real (só a função `euidOk`).
+
+## 0.2.0 (fatia c do M2): passos 1 a 5
+
+- **Alvo:** GLPI 11.0.8, PHP 8.2+. **Versão:** `setup.php` 0.2.0 (a mesma constante vale no `hook.php`); sem DDL novo, mas a tela de Plugins mostra "Atualizar" (G7).
+- **Hooks:** os mesmos da 0.1.0 (`CSRF_COMPLIANT`, `MENU_TOADD`). CronTask `InstaladorExecutor` (MODE_EXTERNAL) agora retoma, executa e prepara, no máximo UMA operação por rodada.
+- **Tabelas/migrations:** nenhuma coluna nova. Estados novos em `estado` (`varchar(32)`): `APROVADA`, `BACKUP`, `TROCANDO`, `MIGRANDO`, `ATIVANDO`, `AGUARDANDO_CONCLUSAO`, `INCERTO`, `SEM_PLUGIN`, `INSTALADO_SEM_VALIDAR`. `INCERTO`/`SEM_PLUGIN` não estão em `aberta_chave` como fechados: a chave fica bloqueada pelo UNIQUE.
+- **Direitos:** `plugin_instalador_aprovar` (UPDATE) para aprovar, com MFA TOTP ativo e reautenticação na hora.
+- **Assets:** nenhum JS/CSS novo. **CSRF:** o formulário de aprovar envia `_glpi_csrf_token` e `front/operacao.php` NÃO chama `Session::checkCSRF()`.
+- **Código de execução:** `proc_open` só em `src/Subprocesso.php` (B-04, lista de permitidos na varredura de `tests/grupos-b.php`).
+- **Testado (contêiner `glpi_app`, `php tests/run.php`):** Executor com duplos de Console/Dumper sobre os zips REAIS do `subticket` 1.1.0 e 1.2.1; Dump contra o MariaDB real (`glpi_db`, isca `hubdump`); Subprocesso contra um `bin/console` falso; Aprovacao (parte pura). Mutações: ver o relatório da fatia.
+- **NÃO testado:** `ReautenticadorGlpi` (precisa de sessão, senha e TOTP reais); `glpi:plugin:install/activate` reais com o `hubteste`; `kill -9` de verdade; a tela de aprovar no navegador; o fluxo na CronTask real. Tudo no roteiro `docs/ROTEIRO-HUBEDESK-C.md`.

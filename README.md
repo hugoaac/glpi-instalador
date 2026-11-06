@@ -2,7 +2,7 @@
 
 Plugin do GLPI 11 que **verifica pacotes de plugin assinados e mostra o plano de instalação**. Alvo: GLPI 11.0.x, PHP 8.2+.
 
-> **Versão 0.1.0 = fatia (b) do M2: só verifica e planeja.** Não há backup, troca de pasta, migração nem ativação neste código; isso é a fatia (c). O botão de aprovar não existe ainda.
+> **Versão 0.2.0 = fatia (c) do M2: passos 1 a 5 de verdade** (aprovação com senha + TOTP, backup com dump, troca de pastas, migração, ativação), até `AGUARDANDO_CONCLUSAO`. Concluir, rollback e restauração são da fatia (d).
 
 Desenho: `docs/desenho-m2.md` do repositório `painel-adm` (§5). O painel (`adm.hubedesk.com.br`) é um **espelho não confiável**: quem decide é este plugin, com as chaves de publicador **fixadas no código** (`src/Publicadores.php`). A aprovação é humana e acontece no GLPI, nunca no painel.
 

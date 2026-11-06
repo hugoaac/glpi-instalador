@@ -4,8 +4,8 @@
  * instalador: verifica pacotes assinados e planeja a instalação em GLPI_MARKETPLACE_DIR.
  * Alvo: GLPI 11.0.x, PHP 8.2+.
  *
- * FATIA (b) do M2 (docs/desenho-m2.md do painel-adm): SÓ VERIFICA E PLANEJA. Não há backup, troca de pasta,
- * migração nem ativação neste código. Isso é a fatia (c).
+ * FATIAS (b) e (c) do M2 (docs/desenho-m2.md do painel-adm): verifica, planeja e (c) executa os passos 1 a 5 (aprovação, backup, troca, migração, ativação).
+ * Concluir, rollback e restauração são da fatia (d).
  */
 
 use Glpi\Plugin\Hooks;
@@ -16,7 +16,7 @@ if (!defined('GLPI_ROOT')) {
 
 // setup.php e hook.php leem a MESMA constante: versão dessincronizada deixaria a migration parada.
 if (!defined('PLUGIN_INSTALADOR_VERSION')) {
-    define('PLUGIN_INSTALADOR_VERSION', '0.1.0');
+    define('PLUGIN_INSTALADOR_VERSION', '0.2.0');
 }
 const PLUGIN_INSTALADOR_MIN_GLPI = '11.0.0';
 const PLUGIN_INSTALADOR_MAX_GLPI = '11.99.99';
