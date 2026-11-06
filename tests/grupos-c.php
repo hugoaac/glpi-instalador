@@ -364,3 +364,39 @@ if (grupo('executar')) {
     file_put_contents("$tmp/ddl/abc/setup.php", $ini);
     ok(Ddl::noPluginInit("$tmp/ddl/abc", 'abc'), 'noPluginInit(S) lê o setup.php do staging');
 }
+
+// ======================================================================== Subprocesso de verdade (proc_open) contra um bin/console falso
+if (grupo('subprocesso')) {
+    $raiz = "$tmp/sub";
+    mkdir("$raiz/bin", 0755, true);
+    mkdir("$raiz/saida", 0755, true);
+    file_put_contents("$raiz/bin/console", <<<'PHP'
+<?php
+echo json_encode($argv), "\n";
+fwrite(STDERR, "erro-de-teste\n");
+$chave = end($argv);
+if ($chave === 'erro') { exit(3); }
+if ($chave === 'lento') { sleep(60); }
+exit(0);
+PHP);
+    $sp = new Subprocesso(PHP_BINARY, $raiz);
+    $arm = new ArmazemMemoria();
+    $arm->idBase = 900000;
+    $id = $arm->criarOperacao(['chave' => 'ok', 'tipo' => 'INSTALAR']);
+    $arm->transitar($id, 'PEDIDA', 'MIGRANDO');
+    $r = $sp->executar('install', 'ok', '-evil user', "$raiz/saida", 20, $arm, $id);
+    eq([$r['exit'], $r['timeout']], [0, false], 'filho que sai 0: exit 0, sem timeout');
+    $argvSaida = json_decode((string) strtok((string) file_get_contents("$raiz/saida/install.out"), "\n"), true);
+    eq(array_slice($argvSaida, 1), ['glpi:plugin:install', '--no-interaction', '--username=-evil user', 'ok'], 'argv em array: --username=<login> num ÚNICO elemento (login com "-" e espaço não vira opção)');
+    ok(str_contains((string) file_get_contents("$raiz/saida/install.err"), 'erro-de-teste'), 'stderr vai para install.err');
+    eq($arm->operacao($id)['filho_pid'], $r['pid'], 'o pid do filho é gravado em operacoes.filho_pid');
+    $r = $sp->executar('install', 'erro', 'x', "$raiz/saida", 20, $arm, $id);
+    eq([$r['exit'], $r['timeout']], [3, false], 'filho que sai 3: exit 3 (a primeira leitura com running=false)');
+    $t0 = time();
+    $r = $sp->executar('install', 'lento', 'x', "$raiz/saida", 2, $arm, $id);
+    eq([$r['exit'], $r['timeout']], [null, true], 'timeout: exit nulo e timeout verdadeiro');
+    ok(time() - $t0 < 15 && !is_dir('/proc/' . $r['pid']), 'timeout: o filho foi morto (TERM/KILL), sem processo órfão');
+    eq(motivo(fn() => $sp->executar('uninstall', 'ok', 'x', "$raiz/saida", 5, $arm, $id)), 'comando', 'só install e activate');
+    eq(motivo(fn() => $sp->executar('install', '../x', 'x', "$raiz/saida", 5, $arm, $id)), 'chave', 'chave revalidada pela regex antes de virar argumento');
+    eq([$sp->filhoVivo(getmypid(), 'ok')], [false], 'filhoVivo: o pid do próprio teste não é glpi:plugin:install');
+}
