@@ -508,6 +508,7 @@ if (grupo('guardas')) {
 }
 
 require __DIR__ . '/grupos-b.php';
+require __DIR__ . '/grupos-c.php';
 
 echo "\n$pass passaram, $fail falharam\n";
 exit($fail === 0 ? 0 : 1);

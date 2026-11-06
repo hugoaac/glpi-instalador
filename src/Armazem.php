@@ -69,4 +69,13 @@ interface Armazem
 
     /** Pastas de staging órfãs e operações abertas há muito tempo: usado pela limpeza. @return list<array<string,mixed>> */
     public function operacoesPorEstado(array $estados): array;
+
+    /** Usuário por id (glpi_users). Só os campos que a execução relê: login, is_active, is_deleted (D2-20, P-4). @return array{login:string,is_active:int,is_deleted:int}|null */
+    public function usuario(int $id): ?array;
+
+    /** G7: devolve {version, state} de glpi_plugins ao que o journal T1 registrou. Só atualiza linha existente. */
+    public function restaurarRegistroPlugin(string $chave, string $version, int $state): void;
+
+    /** O journal de uma operação, em ordem. Só leitura; os dados são FATOS para comparar, nunca para executar. @return list<array{passo:string,fase:string,dados:array<string,mixed>}> */
+    public function journalDe(int $operacaoId): array;
 }

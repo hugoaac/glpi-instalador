@@ -180,4 +180,24 @@ class ArmazemMemoria implements Armazem
     {
         return array_values(array_filter($this->operacoes, static fn(array $o): bool => in_array($o['estado'], $estados, true)));
     }
+
+    /** @var array<int,array{login:string,is_active:int,is_deleted:int}> */
+    public array $usuarios = [];
+
+    public function usuario(int $id): ?array
+    {
+        return $this->usuarios[$id] ?? null;
+    }
+
+    public function restaurarRegistroPlugin(string $chave, string $version, int $state): void
+    {
+        if (isset($this->plugins[$chave])) {
+            $this->plugins[$chave] = ['version' => $version, 'state' => $state];
+        }
+    }
+
+    public function journalDe(int $operacaoId): array
+    {
+        return array_values(array_filter($this->journal, static fn(array $j): bool => $j['operacoes_id'] === $operacaoId));
+    }
 }

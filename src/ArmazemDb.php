@@ -236,4 +236,29 @@ final class ArmazemDb implements Armazem
 
         return $out;
     }
+
+    public function usuario(int $id): ?array
+    {
+        $r = $this->um('glpi_users', ['id' => $id]);
+
+        return $r === null ? null : ['login' => (string) $r['name'], 'is_active' => (int) $r['is_active'], 'is_deleted' => (int) $r['is_deleted']];
+    }
+
+    public function restaurarRegistroPlugin(string $chave, string $version, int $state): void
+    {
+        global $DB;
+        $DB->update('glpi_plugins', ['version' => $version, 'state' => $state], ['directory' => $chave]);
+    }
+
+    public function journalDe(int $operacaoId): array
+    {
+        global $DB;
+        $out = [];
+        foreach ($DB->request(['FROM' => self::T_JOURNAL, 'WHERE' => ['operacoes_id' => $operacaoId], 'ORDER' => 'id ASC']) as $row) {
+            $d = json_decode((string) $row['dados'], true);
+            $out[] = ['passo' => (string) $row['passo'], 'fase' => (string) $row['fase'], 'dados' => is_array($d) ? $d : []];
+        }
+
+        return $out;
+    }
 }

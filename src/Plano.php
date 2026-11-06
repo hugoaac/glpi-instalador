@@ -17,7 +17,7 @@ final class Plano
      * @param list<array{tabela:string,linhas:int}> $tabelas
      * @return array{plano:array<string,mixed>,sha256:string,disco_livre:?int}
      */
-    public static function montar(array $m, ?string $de, string $keyId, array $r1, Contexto $ctx, array $tabelas, ?array $vista, bool $abaixoDaMaisNova, int $expandido): array
+    public static function montar(array $m, ?string $de, string $keyId, array $r1, Contexto $ctx, array $tabelas, ?array $vista, bool $abaixoDaMaisNova, int $expandido, bool $ddlNoInit = false): array
     {
         $cli = $ctx->pluginsDirs;
         $fpm = $ctx->fpmDirs;
@@ -59,6 +59,8 @@ final class Plano
                 : null,
             'versao_mais_nova_conhecida' => $vista['versao_max'] ?? null,
             'abaixo_da_mais_nova' => $abaixoDaMaisNova,
+            'ddl_no_plugin_init' => $ddlNoInit,
+            'ddl_no_plugin_init_aviso' => $ddlNoInit ? 'plugin_init_' . $m['chave'] . ' faz DDL fora do install controlado (D2-22): roda no filho do activate ou na primeira requisição FPM, em vários workers; falha ali não vira INCERTO' : null,
             'disco' => ['necessario' => max(1, $expandido) * 3],
         ];
         $livre = @disk_free_space($ctx->marketplace);

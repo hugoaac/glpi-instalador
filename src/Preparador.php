@@ -70,6 +70,35 @@ final class Preparador
         return ['estado' => $estado, 'resultado' => $r['resultado'], 'motivo' => $r['motivo'], 'plano' => null];
     }
 
+    /**
+     * C5 (fatia c): o passo 1 de novo, no início da execução (estado APROVADA). Apaga o staging da operação e
+     * refaz tudo do zero, inclusive a reverificação da assinatura a partir dos bytes guardados (D2-04.1).
+     * Não muda o estado da operação: quem chama decide. Recusa lança Recusa (o staging já foi limpo).
+     *
+     * @return array<string,mixed> ['plano','sha256'] ou ['resultado','motivo'] (GERENCIADO_EM_OUTRO_LUGAR / JA_NO_ALVO)
+     */
+    public function replanejar(int $opId): array
+    {
+        $op = $this->armazem->operacao($opId);
+        if ($op === null) {
+            throw new Recusa('operacao_inexistente');
+        }
+        $caminhos = new Caminhos($this->ctx->marketplace, $this->ctx->docDir);
+        $raizExistia = is_dir($caminhos->stagingRaiz());
+        Extrator::apagar($caminhos->stagingOp($opId));
+        try {
+            $r = $this->executar($opId, $op, $caminhos);
+        } catch (Recusa $e) {
+            $this->limpar($caminhos, $opId, $raizExistia);
+            throw $e;
+        }
+        if (!isset($r['plano'])) {
+            $this->limpar($caminhos, $opId, $raizExistia);
+        }
+
+        return $r;
+    }
+
     /** @param array<string,mixed> $op */
     private function executar(int $opId, array $op, Caminhos $caminhos): array
     {
@@ -175,7 +204,7 @@ final class Preparador
         $vista = Fatos::maiorVista($this->armazem, $this->assinatura, $this->espelho, $m['chave']);
 
         // 11. O plano.
-        $p = Plano::montar($m, $de, $keyId, ['resultado' => $r1['resultado'], 'motivo' => $r1['motivo']], $this->ctx, $this->armazem->tabelasBackup($m['chave']), $vista, $abaixo, (int) $info['total']);
+        $p = Plano::montar($m, $de, $keyId, ['resultado' => $r1['resultado'], 'motivo' => $r1['motivo']], $this->ctx, $this->armazem->tabelasBackup($m['chave']), $vista, $abaixo, (int) $info['total'], Ddl::noPluginInit($s, $m['chave']));
 
         return ['plano' => $p['plano'], 'sha256' => $p['sha256']];
     }
