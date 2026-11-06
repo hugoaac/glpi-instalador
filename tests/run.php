@@ -268,45 +268,60 @@ if (grupo('zip')) {
 // ======================================================================== preparar-hostil (Q1)
 if (grupo('preparar-hostil')) {
     $motivos = json_decode((string) file_get_contents("$fx/motivos.json"), true);
-    $env = getenv('GLPI_MARKETPLACE_DIR');
-    $usaReal = is_string($env) && $env !== '' && is_dir($env);
-    $base = "$tmp/hostil";
-    mkdir($base, 0700, true);
-    if ($usaReal) {
-        echo "  (marketplace real: $env)\n";
-    }
-    $mpDir = $usaReal ? $env : null;
-    [$ctx, $arm, $cam] = cenario($base, $mpDir);
-    $mpReal = $ctx->marketplace;
-    $antes = listar($mpReal);
-    $ass   = new Assinatura($chaveTeste);
-    $prep  = new Preparador($ctx, $arm, $ass);
-    foreach ($motivos as $arq => $esperado) {
-        $zip = "$fx/$arq";
-        [$mb, $sb, $m] = embalar($zip);
-        $m['versao'] = '1.0.0';
+    // Uma passada do corpus inteiro pelo Preparar num marketplace. O marketplace pode ter operação real em
+    // .hub-staging/op<id> (Hubedesk, 06/11: a 1ª versão deste grupo numerava as operações do teste a partir
+    // de 1 e apagou o .hub-staging/op1 de uma operação real). Os ids do teste ficam muito acima de qualquer
+    // id real, e o teste só confere e apaga o que é dele.
+    $passada = static function (string $base, ?string $mpDir, string $rotulo) use ($motivos, $fx, $chaveTeste): string {
+        mkdir($base, 0700, true);
+        [$ctx, $arm, $cam] = cenario($base, $mpDir);
+        $mp = $ctx->marketplace;
+        $arm->idBase = 900000000;
+        $antes = listar($mp);
+        $prep  = new Preparador($ctx, $arm, new Assinatura($chaveTeste));
+        foreach ($motivos as $arq => $esperado) {
+            $zip = "$fx/$arq";
+            [$mb, $sb, $m] = embalar($zip);
+            $m['versao'] = '1.0.0';
+            $op  = pedir($arm, $cam, $zip, $mb, $sb, $m);
+            $res = $prep->preparar($op);
+            eq([$res['estado'], $res['motivo']], ['FALHA', 'zip_' . $esperado], "$rotulo: Preparar inteiro recusa $arq por zip_$esperado");
+            // os hostis têm o mesmo (chave, versao); o armazém só aceita um por versão: limpa para o próximo
+            $arm->pacotes = [];
+            $arm->operacoes = [];
+        }
+        eq(listar($mp), $antes, "$rotulo: marketplace/ e .hub-* idênticos antes e depois do corpus inteiro (hash por arquivo)");
+        ok(!file_exists("$mp/.hub-staging/op" . ($arm->idBase + 1)), "$rotulo: nenhum staging do teste deixado pelos hostis");
+        $achou = array_filter(array_keys(listar($mp)), static fn($p) => str_contains($p, 'teste'));
+        eq(array_values($achou), [], "$rotulo: nada com a chave \"teste\" em marketplace/");
+        // positiva da mesma bateria: a arvore-m1 passa o MESMO Preparar e deixa o staging
+        $zip = "$fx/arvore-m1.zip";
+        [$mb, $sb, $m] = embalar($zip, ['arvore_sha256' => 'e67b4d9203a36b1aecedae3b4eb7aa4ea3f459454aa7764dd8e3c0bd8cafa045']);
         $op  = pedir($arm, $cam, $zip, $mb, $sb, $m);
         $res = $prep->preparar($op);
-        eq([$res['estado'], $res['motivo']], ['FALHA', 'zip_' . $esperado], "Preparar inteiro recusa $arq por zip_$esperado");
-        // os hostis têm o mesmo (chave, versao); o armazém só aceita um por versão: limpa para o próximo
-        $arm->pacotes = [];
-        $arm->operacoes = [];
+        eq($res['estado'], 'PLANO_PRONTO', "$rotulo: controle positivo arvore-m1.zip chega a PLANO_PRONTO (" . ($res['motivo'] ?? '') . ')');
+        ok(is_file("$mp/.hub-staging/op$op/teste/setup.php"), "$rotulo: o staging fica em .hub-staging/op<id>/<chave>");
+        ok(!file_exists("$mp/teste"), "$rotulo: marketplace/<chave> continua inexistente (nada de troca na fatia b)");
+        Extrator::apagar("$mp/.hub-staging/op$op");
+        @rmdir("$mp/.hub-staging"); // só se ficou vazia: não apaga staging que já existia
+        eq(listar($mp), $antes, "$rotulo: depois de limpar o staging do controle, o marketplace volta ao estado inicial");
+
+        return $mp;
+    };
+
+    // 1. Sempre, num marketplace temporário com uma operação real "isca" em .hub-staging/op1.
+    $isca = "$tmp/hostil-isca";
+    mkdir("$isca/mp/.hub-staging/op1/subticket", 0755, true);
+    file_put_contents("$isca/mp/.hub-staging/op1/subticket/setup.php", '<?php // operação real, não tocar');
+    $passada("$isca/base", "$isca/mp", 'isca');
+    ok(is_file("$isca/mp/.hub-staging/op1/subticket/setup.php"), 'isca: a operação real em .hub-staging/op1 continua intacta');
+
+    // 2. No marketplace REAL, quando o ambiente o define (contêiner do GLPI).
+    $env = getenv('GLPI_MARKETPLACE_DIR');
+    if (is_string($env) && $env !== '' && is_dir($env)) {
+        echo "  (marketplace real: $env)\n";
+        $passada("$tmp/hostil-real", $env, 'real');
     }
-    eq(listar($mpReal), $antes, 'marketplace/ e .hub-* idênticos antes e depois do corpus inteiro (hash por arquivo)');
-    ok(!file_exists($mpReal . '/.hub-staging'), 'nenhum .hub-staging deixado pelos hostis');
-    $achou = array_filter(array_keys(listar($mpReal)), static fn($p) => str_contains($p, 'teste'));
-    eq(array_values($achou), [], 'nada com a chave "teste" em marketplace/');
-    // positiva da mesma bateria: a arvore-m1 passa o MESMO Preparar e deixa o staging
-    $zip = "$fx/arvore-m1.zip";
-    [$mb, $sb, $m] = embalar($zip, ['arvore_sha256' => 'e67b4d9203a36b1aecedae3b4eb7aa4ea3f459454aa7764dd8e3c0bd8cafa045']);
-    $op  = pedir($arm, $cam, $zip, $mb, $sb, $m);
-    $res = $prep->preparar($op);
-    eq($res['estado'], 'PLANO_PRONTO', 'controle positivo: arvore-m1.zip chega a PLANO_PRONTO (' . ($res['motivo'] ?? '') . ')');
-    ok(is_file("$mpReal/.hub-staging/op$op/teste/setup.php"), 'o staging fica em .hub-staging/op<id>/<chave>');
-    ok(!file_exists("$mpReal/teste"), 'e marketplace/<chave> continua inexistente (nada de troca na fatia b)');
-    Extrator::apagar("$mpReal/.hub-staging/op$op");
-    @rmdir("$mpReal/.hub-staging");
-    eq(listar($mpReal), $antes, 'depois de limpar o staging do controle, o marketplace volta ao estado inicial');
 }
 
 // ======================================================================== preparar (pacotes reais, chave principal)

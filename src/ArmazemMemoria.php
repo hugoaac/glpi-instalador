@@ -13,6 +13,12 @@ class ArmazemMemoria implements Armazem
     public array $vistas = [];
     /** @var array<int,array<string,mixed>> */
     public array $operacoes = [];
+    /**
+     * Primeiro id = idBase + 1. Teste que roda sobre um marketplace REAL usa um idBase alto: com ids a partir
+     * de 1, o staging do teste era o .hub-staging/op1 de uma operação real, e a limpeza o apagava
+     * (Hubedesk, 06/11/2026).
+     */
+    public int $idBase = 0;
     /** @var list<array<string,mixed>> */
     public array $journal = [];
     /** @var array<string,array{version:string,state:int}> */
@@ -142,7 +148,7 @@ class ArmazemMemoria implements Armazem
                 throw new Recusa('operacao_aberta', $dados['chave']);
             }
         }
-        $id = count($this->operacoes) + 1;
+        $id = $this->idBase + count($this->operacoes) + 1;
         $this->operacoes[$id] = $dados + ['id' => $id, 'estado' => 'PEDIDA', 'resultado' => null, 'motivo' => null,
             'plano' => null, 'plano_sha256' => null, 'arvore_final' => null];
         $this->operacoes[$id]['id'] = $id;
