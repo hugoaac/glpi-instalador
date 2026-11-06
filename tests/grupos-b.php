@@ -85,6 +85,10 @@ function varrer(string $codigo, string $arquivo = 'x.php', array $dinamicasOk = 
 {
     $proibidas = ['exec', 'shell_exec', 'system', 'passthru', 'popen', 'proc_open', 'proc_terminate', 'call_user_func', 'call_user_func_array',
         'assert', 'create_function', 'putenv', 'dl', 'register_shutdown_function', 'forward_static_call', 'forward_static_call_array'];
+    // Fatia (c), B-04: LISTA DE PERMITIDOS. A proibição vale em todo arquivo, exceto o que consta aqui.
+    // proc_open/proc_terminate só no módulo de subprocesso (desenho §5.8); nada mais ganha exceção.
+    $permitidas = ['Subprocesso.php' => ['proc_open', 'proc_terminate']];
+    $proibidas  = array_values(array_diff($proibidas, $permitidas[$arquivo] ?? []));
     $nomes = [T_STRING, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED];
     $sig = [];
     foreach (token_get_all($codigo) as $tk) {
@@ -511,6 +515,9 @@ if (grupo('varredura')) {
         ok(varrer($cod) !== [], "B-04: a varredura pega: $nome");
     }
     ok(varrer('<?php class A { function system() {} function f() { return $this->exec(1) . self::call_user_func(2); } }') === [], 'B-04: método chamado system/exec numa classe não é falso positivo');
+    ok(varrer('<?php proc_open(["a"], [], $p);', 'Subprocesso.php') === [], 'B-04 (c): proc_open é permitido SÓ em Subprocesso.php');
+    ok(varrer('<?php proc_open(["a"], [], $p);', 'Executor.php') !== [], 'B-04 (c): proc_open em outro arquivo é achado');
+    ok(varrer('<?php exec("id");', 'Subprocesso.php') !== [], 'B-04 (c): a exceção do Subprocesso.php não libera exec');
     ok(varrer('<?php require_once $f;', 'setup.php') === [], 'B-04: o autoloader do setup.php é o único require permitido');
     ok(varrer('<?php require_once $f;', 'outro.php') !== [], 'B-04: require_once fora do setup.php é achado');
 
