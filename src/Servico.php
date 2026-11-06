@@ -54,7 +54,9 @@ final class Servico
         $r[] = ['ok' => $fpm === null ? null : ($fpm['plugins'] === $dirs['plugins'] && $fpm['marketplace'] === $dirs['marketplace']),
             'nome' => 'Diretórios de plugins iguais no FPM e na CLI',
             'detalhe' => $fpm === null ? 'o FPM ainda não gravou a sua visão (abra esta página pelo navegador)' : 'GLPI_PLUGINS_DIRECTORIES: ' . implode(' , ', $dirs['plugins'])];
-        $r[] = ['ok' => ($dirs['allow_override'] === 'false'), 'nome' => 'GLPI_MARKETPLACE_ALLOW_OVERRIDE = false (C1)', 'detalhe' => 'valor lido neste processo: ' . $dirs['allow_override']];
+        $desligado = defined('GLPI_MARKETPLACE_ALLOW_OVERRIDE') && Contexto::overrideDesligado(constant('GLPI_MARKETPLACE_ALLOW_OVERRIDE'));
+        $r[] = ['ok' => $desligado, 'nome' => 'GLPI_MARKETPLACE_ALLOW_OVERRIDE desligado (C1)', 'detalhe' => 'valor lido neste processo: ' . $dirs['allow_override']
+            . ($desligado ? '' : ' (o GLPI o trata como ligado; use 0 no ambiente, não "false")')];
 
         return $r;
     }

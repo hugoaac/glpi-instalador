@@ -474,6 +474,20 @@ if (grupo('catalogo-b10')) {
     eq([$r['ok'], $r['novos'], count($r['rejeitados'])], [true, 1, 1], 'B-10: zip_repetido no catálogo é rejeitado sem derrubar a rodada');
 }
 
+// ======================================================================== C1 com o valor real do ambiente
+// Achado no Hubedesk (06/11): o requisito exigia a string 'false', e o ambiente entrega "0" (o que o desenho
+// manda pôr). O teste agora é o do GLPI: !GLPI_MARKETPLACE_ALLOW_OVERRIDE.
+if (grupo('c1')) {
+    foreach (['0' => true, '' => true] as $v => $esperado) {
+        eq(Contexto::overrideDesligado((string) $v), $esperado, "C1: variável de ambiente \"$v\" desliga o override");
+    }
+    eq(Contexto::overrideDesligado(false), true, 'C1: false (local_define.php) desliga');
+    eq(Contexto::overrideDesligado(0), true, 'C1: 0 inteiro desliga');
+    eq(Contexto::overrideDesligado('false'), false, 'C1: a string "false" LIGA, como no GLPI (o erro que o C1 corrigiu)');
+    eq(Contexto::overrideDesligado(true), false, 'C1: true liga');
+    eq(Contexto::overrideDesligado('1'), false, 'C1: "1" liga');
+}
+
 // ======================================================================== varredura por token (B-04)
 if (grupo('varredura')) {
     $ruins = [

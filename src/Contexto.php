@@ -25,6 +25,16 @@ final class Contexto
     ) {
     }
 
+    /**
+     * C1: o override do marketplace nativo está desligado? O teste é o MESMO do GLPI
+     * (`!GLPI_MARKETPLACE_ALLOW_OVERRIDE`, Marketplace/Controller.php:392): o valor vem de variável de
+     * ambiente como string, então "0" desliga e "false" (string não vazia) liga.
+     */
+    public static function overrideDesligado(mixed $valor): bool
+    {
+        return !$valor;
+    }
+
     /** Lista de diretórios do processo atual, normalizada para comparação CLI x FPM. */
     public static function visaoAtual(): array
     {
