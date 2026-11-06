@@ -5,7 +5,25 @@
         <div class="card-body">
             <p>Estado: <strong>{{ op.estado }}</strong>{% if op.resultado %} &middot; resultado: <strong>{{ op.resultado }}</strong>{% endif %}{% if op.motivo %} &middot; motivo: <code>{{ op.motivo }}</code>{% endif %}</p>
             {% if op.estado == 'PLANO_PRONTO' %}
-                <div class="alert alert-warning">Plano em <strong>modo simulação</strong>. Nesta versão (fatia b) não há botão de aprovar: a execução é da fatia c.</div>
+                {% if pode_aprovar %}
+                <form method="post" action="{{ acao }}" autocomplete="off" class="mt-2">
+                    <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="id" value="{{ op.id }}">
+                    <input type="hidden" name="plano_sha256" value="{{ op.plano_sha256 }}">
+                    <div class="alert alert-warning">Aprovar este plano permite ao cron trocar o código do plugin e migrar o banco. Reautentique-se agora (senha e código TOTP).</div>
+                    <div class="mb-2"><label><input type="checkbox" name="backup_confirmado" value="1"> Existe um <strong>backup completo do banco com menos de 24 h</strong> e confirmo isso. Meu nome fica registrado só neste GLPI.</label></div>
+                    {% if plano and plano.abaixo_da_mais_nova %}
+                    <div class="mb-2 text-danger"><label><input type="checkbox" name="abaixo_confirmado" value="1"> Instalar versão <strong>abaixo da mais nova conhecida</strong> ({{ plano.versao_mais_nova_conhecida }}).</label></div>
+                    {% endif %}
+                    <div class="row g-2 mb-2">
+                        <div class="col-auto"><input class="form-control" type="password" name="senha" placeholder="Senha" autocomplete="off" required></div>
+                        <div class="col-auto"><input class="form-control" type="text" name="totp" placeholder="Código TOTP" inputmode="numeric" autocomplete="off" maxlength="8" required></div>
+                        <div class="col-auto"><button class="btn btn-primary" type="submit" name="aprovar" value="1">Aprovar plano</button></div>
+                    </div>
+                </form>
+                {% else %}
+                <div class="alert alert-info">Para aprovar é preciso o direito "Instalador (aprovar)", sem personificação.</div>
+                {% endif %}
             {% endif %}
         </div>
     </div>
@@ -22,7 +40,7 @@
             <tr><th>Diretórios CLI &times; FPM</th><td>{% if plano.diretorios.iguais is same as(true) %}iguais{% elseif plano.diretorios.iguais is same as(false) %}<strong class="text-danger">DIFERENTES</strong>{% else %}FPM ainda não visto{% endif %}: {{ plano.diretorios.cli|join(' , ') }}</td></tr>
             <tr><th>opcache.validate_timestamps</th><td>{{ plano.opcache_validate_timestamps is null ? 'desconhecido' : (plano.opcache_validate_timestamps ? 'ligado' : 'DESLIGADO: depois da troca é preciso reiniciar o FPM') }}</td></tr>
             <tr><th>cron_limit</th><td>{{ plano.cron_limit }}{% if plano.cron_limit_aviso %} <div class="alert alert-warning mt-1 mb-0">{{ plano.cron_limit_aviso }}</div>{% endif %}</td></tr>
-            <tr><th>Versão mais nova já vista</th><td>{{ plano.versao_mais_nova_conhecida ?? '-' }}{% if plano.abaixo_da_mais_nova %} <div class="alert alert-danger mt-1 mb-0">Este pacote é <strong>mais antigo</strong> que a mais nova conhecida. A aprovação (fatia c) exigirá confirmação própria.</div>{% endif %}</td></tr>
+            <tr><th>Versão mais nova já vista</th><td>{{ plano.versao_mais_nova_conhecida ?? '-' }}{% if plano.abaixo_da_mais_nova %} <div class="alert alert-danger mt-1 mb-0">Este pacote é <strong>mais antigo</strong> que a mais nova conhecida. A aprovação exige confirmação própria.</div>{% endif %}</td></tr>
             <tr><th>Backup que a execução faria</th><td>
                 <div class="text-danger">{{ plano.backup.sensivel }}</div>
                 <div class="text-muted">Retenção: {{ plano.backup.retencao }}</div>

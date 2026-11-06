@@ -400,3 +400,60 @@ PHP);
     eq(motivo(fn() => $sp->executar('install', '../x', 'x', "$raiz/saida", 5, $arm, $id)), 'chave', 'chave revalidada pela regex antes de virar argumento');
     eq([$sp->filhoVivo(getmypid(), 'ok')], [false], 'filhoVivo: o pid do próprio teste não é glpi:plugin:install');
 }
+
+// ======================================================================== aprovação (a parte pura; senha/TOTP atrás do Reautenticador)
+final class ReautFalso implements GlpiPlugin\Instalador\Reautenticador
+{
+    public int $chamadas = 0;
+    public ?string $resposta = null;
+    public array $vistos = [];
+
+    public function verificar(int $uid, string $senha, string $totp): ?string
+    {
+        ++$this->chamadas;
+        $this->vistos[] = [$uid, $senha, $totp];
+
+        return $this->resposta;
+    }
+}
+
+if (grupo('aprovacao')) {
+    $mk = static function (bool $abaixo = false): array {
+        $arm = new ArmazemMemoria();
+        $id = $arm->criarOperacao(['chave' => 'x', 'tipo' => 'INSTALAR']);
+        $arm->transitar($id, 'PEDIDA', 'PLANO_PRONTO', ['plano' => json_encode(['abaixo_da_mais_nova' => $abaixo]), 'plano_sha256' => str_repeat('a', 64)]);
+
+        return [$arm, $id, new ReautFalso()];
+    };
+    $A = GlpiPlugin\Instalador\Aprovacao::class;
+    $sha = str_repeat('a', 64);
+
+    [$arm, $id, $re] = $mk();
+    $r = $A::aprovar($arm, $re, $id, 5, false, $sha, true, false, 'segredo', '123456');
+    eq([$r['ok'], $arm->operacao($id)['estado'], $arm->operacao($id)['aprovado_por'], $arm->operacao($id)['backup_confirmado_por']], [true, 'APROVADA', 5, 5], 'aprovar grava o aprovador e quem confirmou o backup (ids, só no GLPI)');
+    ok(!str_contains(json_encode($arm->journal), 'segredo') && !str_contains(json_encode($arm->operacoes), 'segredo') && !str_contains(json_encode($arm->journal), '123456'), 'a senha e o TOTP não aparecem no journal nem na operação');
+
+    [$arm, $id, $re] = $mk();
+    $r = $A::aprovar($arm, $re, $id, 5, true, $sha, true, false, 's', '123456');
+    ok(!$r['ok'] && $re->chamadas === 0 && $arm->operacao($id)['estado'] === 'PLANO_PRONTO', 'personificação: recusa antes de qualquer reautenticação');
+    [$arm, $id, $re] = $mk();
+    $re->resposta = 'senha ou código inválidos';
+    $r = $A::aprovar($arm, $re, $id, 5, false, $sha, true, false, 's', '123456');
+    ok(!$r['ok'] && $arm->operacao($id)['estado'] === 'PLANO_PRONTO', 'senha/TOTP errados: continua PLANO_PRONTO');
+    [$arm, $id, $re] = $mk();
+    $r = $A::aprovar($arm, $re, $id, 5, false, str_repeat('b', 64), true, false, 's', '123456');
+    ok(!$r['ok'] && $arm->operacao($id)['estado'] === 'PLANO_PRONTO', 'plano_sha256 do formulário diferente do banco: recusa');
+    [$arm, $id, $re] = $mk();
+    ok(!$A::aprovar($arm, $re, $id, 5, false, $sha, false, false, 's', '123456')['ok'], 'sem o checkbox do backup: recusa');
+    [$arm, $id, $re] = $mk(true);
+    ok(!$A::aprovar($arm, $re, $id, 5, false, $sha, true, false, 's', '123456')['ok'], 'versão abaixo da mais nova sem o 2º checkbox: recusa');
+    $r = $A::aprovar($arm, $re, $id, 5, false, $sha, true, true, 's', '123456');
+    eq([$r['ok'], (int) $arm->operacao($id)['abaixo_da_mais_nova_confirmado']], [true, 1], 'com o 2º checkbox: aprova e grava abaixo_da_mais_nova_confirmado');
+    [$arm, $id, $re] = $mk();
+    $arm->operacoes[$id]['date_mod'] = date('Y-m-d H:i:s', time() - 90000);
+    $r = $A::aprovar($arm, $re, $id, 5, false, $sha, true, false, 's', '123456');
+    eq([$r['ok'], $arm->operacao($id)['estado'], $arm->operacao($id)['motivo']], [false, 'FALHA', 'expirado'], 'PLANO_PRONTO com mais de 24 h: FALHA expirado');
+    [$arm, $id, $re] = $mk();
+    $arm->transitar($id, 'PLANO_PRONTO', 'FALHA');
+    ok(!$A::aprovar($arm, $re, $id, 5, false, $sha, true, false, 's', '123456')['ok'], 'só se aprova operação em PLANO_PRONTO (transição condicional)');
+}

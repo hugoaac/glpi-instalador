@@ -28,6 +28,17 @@ final class Servico
         return new Preparador($ctx, self::armazem(), new Assinatura(), self::painel(), self::espelho($ctx));
     }
 
+
+    /** Fatia (c): o executor dos passos 1 a 5, com o dump em conexão própria e o console em subprocesso. */
+    public static function executor(): Executor
+    {
+        $ctx = Contexto::doGlpi();
+        $ass = new Assinatura();
+        $prep = new Preparador($ctx, self::armazem(), $ass, self::painel(), self::espelho($ctx));
+
+        return new Executor($ctx, self::armazem(), $ass, $prep, Dump::doGlpi(), Subprocesso::doGlpi());
+    }
+
     /** B-02b: espelho em arquivo da maior versão vista, em GLPI_PLUGIN_DOC_DIR/instalador/. */
     public static function espelho(?Contexto $ctx = null): Espelho
     {

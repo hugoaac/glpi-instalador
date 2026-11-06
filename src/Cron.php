@@ -14,7 +14,7 @@ use Toolbox;
  *
  * Guardas: só CLI; dono de um arquivo criado = dono do marketplace; flock + GET_LOCK (D2-08).
  * Rodada: locks -> no máximo UMA operação preparada -> catálogo online (1 h) -> limpeza de staging órfão.
- * FATIA (b): a rodada só prepara e planeja. Aprovação, backup, troca e migração são da fatia (c).
+ * FATIA (c): retoma o que ficou no meio, executa UMA operação APROVADA (passos 1 a 5) ou prepara uma PEDIDA.
  */
 final class Cron
 {
@@ -109,8 +109,22 @@ final class Cron
         if ($n > 0) {
             $task->log("$n operação(ões) interrompida(s) marcada(s) como FALHA");
         }
-        // no máximo uma operação por rodada
-        foreach ($arm->operacoesPorEstado(['PEDIDA']) as $op) {
+        // Fatia (c): o que ficou no meio (kill -9, OOM) e as APROVADAS. No máximo UMA operação avança por rodada.
+        $ex = Servico::executor();
+        $retomadas = $ex->retomar();
+        if ($retomadas > 0) {
+            $task->log("$retomadas operação(ões) retomada(s) pelo journal");
+            $feito++;
+        } else {
+            foreach ($arm->operacoesPorEstado(['APROVADA']) as $op) {
+                $r = $ex->executar((int) $op['id']);
+                $task->log('op ' . $op['id'] . ': ' . $r['estado'] . ' ' . ($r['resultado'] ?? '') . ' ' . ($r['motivo'] ?? ''));
+                $feito++;
+                break;
+            }
+        }
+        // no máximo uma operação por rodada (a de preparo só roda se nada foi executado agora)
+        foreach ($feito > 0 ? [] : $arm->operacoesPorEstado(["PEDIDA"]) as $op) {
             $r = Servico::preparador()->preparar((int) $op['id']);
             $task->log('op ' . $op['id'] . ': ' . $r['estado'] . ' ' . ($r['resultado'] ?? '') . ' ' . ($r['motivo'] ?? ''));
             $feito++;
