@@ -67,3 +67,24 @@ Não testado: `GET_LOCK` com dois bancos diferentes no mesmo servidor; o cron co
 - **Código de execução:** `proc_open` só em `src/Subprocesso.php` (B-04, lista de permitidos na varredura de `tests/grupos-b.php`).
 - **Testado (contêiner `glpi_app`, `php tests/run.php`):** Executor com duplos de Console/Dumper sobre os zips REAIS do `subticket` 1.1.0 e 1.2.1; Dump contra o MariaDB real (`glpi_db`, isca `hubdump`); Subprocesso contra um `bin/console` falso; Aprovacao (parte pura). Mutações: ver o relatório da fatia.
 - **NÃO testado:** `ReautenticadorGlpi` (precisa de sessão, senha e TOTP reais); `glpi:plugin:install/activate` reais com o `hubteste`; `kill -9` de verdade; a tela de aprovar no navegador; o fluxo na CronTask real. Tudo no roteiro `docs/ROTEIRO-HUBEDESK-C.md`.
+
+## Prova ao vivo da fatia (c), 08/11/2026 (contêiner `glpi_app`, GLPI **11.0.7**, PHP 8.5.7)
+
+O contêiner local roda GLPI 11.0.7, não 11.0.8. Harness: `tools/vivo.php` (só no contêiner; a chave de TESTE entra pelo construtor de `Assinatura`; reproduz a rodada do Cron com ela, porque o Cron real usa `Publicadores::LISTA`). Tudo com `Subprocesso`, `Dump`, `ArmazemDb` e `bin/console` REAIS e o `hubteste`.
+
+- **Instalação do zero (hubteste 1.0.0):** aprovação, passos 1-5, `AGUARDANDO_CONCLUSAO`; `glpi_plugins` = 1.0.0 `ACTIVATED`; `glpi_plugin_hubteste_itens` existe; `marketplace/hubteste` com a `arvore` do manifesto; journal completo; `verificar-dump.php` confere o backup.
+- **Atualização (1.0.0 para 1.0.2):** `glpi:plugin:install` SEM `--force` passa: o próprio comando chama `checkPluginState`, que põe a linha em `NOTUPDATED` (6, visto `1.0.2/6` por amostragem a cada 0,3 s) e `canRunInstallMethod` só recusa `ACTIVATED/TOBECONFIGURED/NOTACTIVATED`. Coluna `observacao` criada, dado de teste preservado, janela `NOTUPDATED` medida (6,0 s com `sleep` de 4 s), `--username=hubinst.aprov` visto em `/proc/<pid>/cmdline` do filho.
+- **`kill -9`:** (a) no processo do cron durante o install: o filho segue, a rodada seguinte espera (28 s) e dá `INCERTO/filho_sem_resultado` mesmo com `glpi_plugins` já em 1.0.3 (decisão do Hugo, 08/11); (b) só no filho: `INCERTO/migracao_erro` com `exit -1`. Nos dois: uma única linha em `hubteste/execucoes.log`, um único `MIGRAR/ANTES` com `filho_pid`, chave bloqueada (`pedir` recusa, rodada seguinte não faz nada).
+- **`ReautenticadorGlpi` (usuário local, TOTP gerado no teste, código RFC 6238 calculado no teste):** senha+código certos passam; senha errada, código errado, sem MFA e login da sessão diferente do uid não passam; `$_SESSION` idêntica antes e depois, `last_login`, `glpi_events` e a pasta de sessões inalterados. Personificação recusada em `Aprovacao`.
+- **Telas por HTTP:** `front/instalador.php` e `front/operacao.php` renderizam (200, sem erro de Twig/PHP); o perfil só-leitura não vê o formulário; POST sem `_glpi_csrf_token` = 403; POST com token válido sem o direito `plugin_instalador_aprovar` = 403; POST do aprovador com tudo certo é recusado nesta versão com a mensagem explícita abaixo.
+
+### Defeitos achados e corrigidos
+1. `glpi:plugin:activate` não tem `--username` (só o `install`, `InstallCommand.php:75`): todo `activate` saía com exit 1 e a operação ia a `INSTALADO_SEM_VALIDAR`. O `bin/console` falso do teste aceitava qualquer opção. Corrigido em `Subprocesso`, e o falso agora recusa como o Symfony.
+2. `TOTPManager::checkMFARateLimit/clearMFAFailures` só existem desde o GLPI 11.0.8: em 11.0.7 era um `Error` engolido por `catch (Throwable)` e TODA aprovação respondia "muitas tentativas de MFA". Agora `ReautenticadorGlpi::temLimite()` decide antes e a mensagem diz que o GLPI precisa de 11.0.8+; o painel de requisitos ganhou a linha.
+3. `tests/run.php`: a checagem "nada com a chave teste em marketplace/" casava por substring e quebrava com o `hubteste` instalado.
+4. `hubteste` v1.0.0 e v1.0.1 têm `ParseError` no `hook.php` (barra invertida perdida em `'/\'`): o install delas nunca funcionou. Corrigido na v1.0.2 (as tags antigas já estão no GitHub e não foram movidas).
+
+### Não provado aqui
+- O **limite de tentativas de MFA** (5 em 15 min; "código errado conta"): o core 11.0.7 do contêiner não tem a classe nem o `symfony/rate-limiter`. No harness a exigência foi desligada (`VIVO_EXIGIR_LIMITE` ausente) só para exercitar o resto; **a prova do limite exige um GLPI 11.0.8+** (Hubedesk).
+- Aprovação **pela tela** com sucesso (mesma causa).
+- O **Cron real** com pacote de teste: ele usa as chaves de publicador fixadas e recusaria a assinatura de teste. Rodou ocioso e registrado em `cron.log`; a rodada com operação foi a do harness.
