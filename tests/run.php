@@ -292,7 +292,7 @@ if (grupo('preparar-hostil')) {
         }
         eq(listar($mp), $antes, "$rotulo: marketplace/ e .hub-* idênticos antes e depois do corpus inteiro (hash por arquivo)");
         ok(!file_exists("$mp/.hub-staging/op" . ($arm->idBase + 1)), "$rotulo: nenhum staging do teste deixado pelos hostis");
-        $achou = array_filter(array_keys(listar($mp)), static fn($p) => str_contains($p, 'teste'));
+        $achou = array_filter(array_keys(listar($mp)), static fn($p) => preg_match('#(^|/)teste(/|$)#', (string) $p) === 1); // componente exato: "hubteste" (plugin de teste instalado) não conta
         eq(array_values($achou), [], "$rotulo: nada com a chave \"teste\" em marketplace/");
         // positiva da mesma bateria: a arvore-m1 passa o MESMO Preparar e deixa o staging
         $zip = "$fx/arvore-m1.zip";

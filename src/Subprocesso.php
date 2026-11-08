@@ -33,7 +33,12 @@ final class Subprocesso implements Console
         if (preg_match(Manifesto::RE_CHAVE, $chave) !== 1) {
             throw new Recusa('chave', 'chave inválida para o console');
         }
-        $argv = [$this->php, $this->glpiRoot . '/bin/console', 'glpi:plugin:' . $comando, '--no-interaction', '--username=' . $login, $chave];
+        // Só "glpi:plugin:install" tem --username (InstallCommand.php:75); "activate" NÃO tem e o Symfony recusa a opção (exit 1).
+        $argv = [$this->php, $this->glpiRoot . '/bin/console', 'glpi:plugin:' . $comando, '--no-interaction'];
+        if ($comando === 'install') {
+            $argv[] = '--username=' . $login;
+        }
+        $argv[] = $chave;
         if (!is_dir($dirSaida)) {
             throw new Recusa('saida', 'pasta de saída inexistente');
         }

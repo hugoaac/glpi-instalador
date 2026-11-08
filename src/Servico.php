@@ -55,6 +55,8 @@ final class Servico
         $r[] = ['ok' => extension_loaded('zip') && extension_loaded('zlib'), 'nome' => 'Extensões zip e zlib', 'detalhe' => 'leitura do pacote'];
         $falta = PainelInformante::requisito();
         $r[] = ['ok' => $falta === null, 'nome' => 'Plugin informante >= ' . PainelInformante::VERSAO_MINIMA . ' ativo', 'detalhe' => $falta ?? 'ok (transporte e identidade do ambiente)'];
+        $r[] = ['ok' => ReautenticadorGlpi::temLimite('Glpi\\Security\\TOTPManager'), 'nome' => 'Limite de tentativas de MFA do GLPI (11.0.8 ou mais)',
+            'detalhe' => 'sem ele o instalador recusa toda aprovação (TOTPManager::checkMFARateLimit)'];
         $n = count(Publicadores::LISTA);
         $r[] = ['ok' => Publicadores::prontoParaCliente(), 'nome' => 'Chaves de publicador fixadas', 'detalhe' => $n . ' de ' . Publicadores::CHAVES_PARA_CLIENTE
             . ($n < Publicadores::CHAVES_PARA_CLIENTE ? ': falta a RESERVA. Nenhum GLPI de cliente recebe este instalador sem as duas chaves.' : '')];

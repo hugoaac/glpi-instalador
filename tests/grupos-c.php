@@ -375,6 +375,12 @@ if (grupo('subprocesso')) {
 echo json_encode($argv), "\n";
 fwrite(STDERR, "erro-de-teste\n");
 $chave = end($argv);
+// Como o console real: "glpi:plugin:activate" NÃO tem --username (Symfony: The "--username" option does not exist). Achado ao vivo.
+if (($argv[1] ?? '') === 'glpi:plugin:activate') {
+    foreach ($argv as $a) {
+        if (str_starts_with($a, '--username')) { fwrite(STDERR, "The --username option does not exist.\n"); exit(1); }
+    }
+}
 if ($chave === 'erro') { exit(3); }
 if ($chave === 'lento') { sleep(60); }
 exit(0);
@@ -390,6 +396,10 @@ PHP);
     eq(array_slice($argvSaida, 1), ['glpi:plugin:install', '--no-interaction', '--username=-evil user', 'ok'], 'argv em array: --username=<login> num ÚNICO elemento (login com "-" e espaço não vira opção)');
     ok(str_contains((string) file_get_contents("$raiz/saida/install.err"), 'erro-de-teste'), 'stderr vai para install.err');
     eq($arm->operacao($id)['filho_pid'], $r['pid'], 'o pid do filho é gravado em operacoes.filho_pid');
+    $ra = $sp->executar('activate', 'ok', 'hugo', "$raiz/saida", 20, $arm, $id);
+    eq($ra['exit'], 0, 'activate: o console real não aceita --username, então ele não vai no argv');
+    $argvAct = json_decode((string) strtok((string) file_get_contents("$raiz/saida/activate.out"), "\n"), true);
+    eq(array_slice($argvAct, 1), ['glpi:plugin:activate', '--no-interaction', 'ok'], 'activate: argv sem --username');
     $r = $sp->executar('install', 'erro', 'x', "$raiz/saida", 20, $arm, $id);
     eq([$r['exit'], $r['timeout']], [3, false], 'filho que sai 3: exit 3 (a primeira leitura com running=false)');
     $t0 = time();
@@ -418,6 +428,18 @@ final class ReautFalso implements GlpiPlugin\Instalador\Reautenticador
 }
 
 if (grupo('aprovacao')) {
+    // Achado na prova ao vivo (GLPI 11.0.7): sem checkMFARateLimit o core lança Error; temLimite() decide ANTES, de forma explícita.
+    $semLimite = new class {
+        public function is2FAEnabled(int $u): bool { return true; }
+    };
+    $comLimite = new class {
+        public function checkMFARateLimit(int $u): void {}
+        public function clearMFAFailures(int $u): void {}
+    };
+    $R = GlpiPlugin\Instalador\ReautenticadorGlpi::class;
+    ok(!$R::temLimite($semLimite), 'temLimite: TOTPManager sem checkMFARateLimit (GLPI < 11.0.8) não tem limite');
+    ok($R::temLimite($comLimite), 'temLimite: com checkMFARateLimit e clearMFAFailures tem limite');
+    ok(!$R::temLimite(new class { public function checkMFARateLimit(int $u): void {} }), 'temLimite: só um dos dois métodos não basta');
     $mk = static function (bool $abaixo = false): array {
         $arm = new ArmazemMemoria();
         $id = $arm->criarOperacao(['chave' => 'x', 'tipo' => 'INSTALAR']);

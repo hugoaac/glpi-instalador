@@ -19,16 +19,38 @@ use Throwable;
  */
 final class ReautenticadorGlpi implements Reautenticador
 {
+    /**
+     * $exigirLimite=false SÓ para a prova ao vivo em GLPI < 11.0.8 (tools/vivo.php): lá o core não tem o limite de tentativas
+     * de MFA e a prova do limite fica para um GLPI 11.0.8+. O código de produção (front/operacao.php) usa o padrão: exige.
+     */
+    public function __construct(private readonly bool $exigirLimite = true)
+    {
+    }
+
+    /** checkMFARateLimit/clearMFAFailures existem desde o GLPI 11.0.8 (TOTPManager.php:425/:438). Antes, chamá-los é um Error. */
+    public static function temLimite(object|string $mfa): bool
+    {
+        return method_exists($mfa, 'checkMFARateLimit') && method_exists($mfa, 'clearMFAFailures');
+    }
+
     public function verificar(int $uid, string $senha, string $totp): ?string
     {
         $mfa = new TOTPManager();
+        $limite = self::temLimite($mfa);
+        if (!$limite && $this->exigirLimite) {
+            // Fecha de forma explícita: sem o limite, um Error "método indefinido" cairia no catch abaixo e viraria
+            // "muitas tentativas" para TODA aprovação, com a causa escondida.
+            return 'este GLPI não limita as tentativas de MFA (exige 11.0.8 ou mais); aprovação indisponível';
+        }
         if (!$mfa->is2FAEnabled($uid)) {
             return 'aprovador sem MFA (TOTP) ativo';
         }
-        try {
-            $mfa->checkMFARateLimit($uid);
-        } catch (Throwable) {
-            return 'muitas tentativas de MFA; aguarde 15 minutos';
+        if ($limite) {
+            try {
+                $mfa->checkMFARateLimit($uid);
+            } catch (Throwable) {
+                return 'muitas tentativas de MFA; aguarde 15 minutos';
+            }
         }
         $login = (string) ($_SESSION['glpiname'] ?? '');
         if ($login === '' || $senha === '' || preg_match('/^[0-9]{6,8}\z/', $totp) !== 1) {
@@ -47,7 +69,9 @@ final class ReautenticadorGlpi implements Reautenticador
         if (!$mfa->verifyCodeForUser($totp, $uid)) {
             return 'senha ou código inválidos';
         }
-        $mfa->clearMFAFailures($uid);
+        if ($limite) {
+            $mfa->clearMFAFailures($uid);
+        }
 
         return null;
     }
